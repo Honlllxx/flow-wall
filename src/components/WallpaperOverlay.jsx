@@ -1,79 +1,179 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { AreaChart, Area, ResponsiveContainer, YAxis, XAxis, Label } from 'recharts';
 
+const COLORS = [
+  '#60A5FA', '#F87171', '#34D399', '#FBBF24', 
+  '#A78BFA', '#F472B6', '#2DD4BF', '#FB923C',
+];
+
 const WallpaperOverlay = () => {
   const [allData, setAllData] = useState([]);
   const [viewMode, setViewMode] = useState('raw');
   const [weights, setWeights] = useState({});
+  const [displayConfig, setDisplayConfig] = useState({ mode: 'single', combinedMetrics: [], multiMetrics: [] });
 
   useEffect(() => {
     window.api.getData().then(setAllData);
     window.api.onDataUpdate(setAllData);
     window.api.getWeights().then(setWeights);
     window.api.onWeightsUpdate(setWeights);
+    window.api.getDisplayConfig().then(setDisplayConfig);
+    window.api.onDisplayConfigUpdate(setDisplayConfig);
   }, []);
 
-  const { chartData, currentMetric, stats } = useMemo(() => {
-    if (allData.length === 0) return { chartData: [], currentMetric: null, stats: {} };
+  const { chartData, displayInfo, areas } = useMemo(() => {
+    if (allData.length === 0) return { chartData: [], displayInfo: null, areas: [] };
 
-    const lastEntry = allData[allData.length - 1];
-    const targetType = lastEntry.type;
-    const currentWeight = weights[targetType] || 1;
-    const typeData = allData.filter(item => item.type === targetType);
+    const getScore = (val, type) => {
+      const w = weights[type] || 1;
+      return Number((val * w).toFixed(1));
+    };
 
     let processedData = [];
-    const calcScore = (val) => Number((val * currentWeight).toFixed(1));
+    let title = "";
+    let subTitle = "";
+    let mainNumber = 0;
+    let chartAreas = [];
 
-    if (viewMode === 'raw') {
-      processedData = typeData.slice(-20).map(item => ({
-        ...item,
-        score: calcScore(item.value),
-        label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      }));
-    } else if (viewMode === 'hour') {
-      const todayStr = new Date().toDateString();
-      const todayData = typeData.filter(item => new Date(item.timestamp).toDateString() === todayStr);
-      const hoursMap = new Array(24).fill(0);
-      todayData.forEach(item => hoursMap[new Date(item.timestamp).getHours()] += item.value);
-      const currentHour = new Date().getHours();
-      processedData = hoursMap.slice(0, currentHour + 1).map((val, idx) => ({
-        value: val,
-        score: calcScore(val), 
-        label: `${idx}:00`,
-        type: targetType
-      }));
-    } else if (viewMode === 'day') {
-      const daysMap = {};
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(); d.setDate(d.getDate() - i);
-        const dateKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        daysMap[dateKey] = 0;
+    // 模式 A: Auto Single
+    if (displayConfig.mode === 'single') {
+      const lastEntry = allData[allData.length - 1];
+      const targetType = lastEntry.type;
+      title = `${targetType} · ${viewMode.toUpperCase()}`;
+      
+      chartAreas.push({ key: 'score', color: '#f1f5f9', fill: true });
+
+      if (viewMode === 'raw') {
+        const typeData = allData.filter(i => i.type === targetType).slice(-20);
+        processedData = typeData.map(item => ({
+          score: getScore(item.value, item.type),
+          label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }));
+        mainNumber = getScore(lastEntry.value, targetType);
+        subTitle = `Raw: ${lastEntry.value} ${lastEntry.unit}`;
+      } 
+      else if (viewMode === 'hour' || viewMode === 'day') {
+        const bucketMap = {};
+        const isHour = viewMode === 'hour';
+        if (isHour) {
+            new Array(24).fill(0).forEach((_, i) => bucketMap[i] = 0);
+        } else {
+            for(let i=6; i>=0; i--) { 
+                const d = new Date(); d.setDate(d.getDate()-i); 
+                bucketMap[d.toISOString().split('T')[0]] = 0; 
+            }
+        }
+        allData.filter(i => i.type === targetType).forEach(i => {
+             const key = isHour ? new Date(i.timestamp).getHours() : i.date;
+             const isToday = new Date(i.timestamp).toDateString() === new Date().toDateString();
+             if (bucketMap[key] !== undefined && (viewMode === 'day' || isToday)) {
+                 bucketMap[key] += i.value;
+             }
+        });
+        const currentHour = new Date().getHours();
+        processedData = Object.entries(bucketMap).map(([k, v]) => {
+            if (isHour && parseInt(k) > currentHour) return null;
+            return {
+                score: getScore(v, targetType),
+                label: isHour ? `${k}:00` : k.slice(5)
+            };
+        }).filter(Boolean);
+        const totalRaw = processedData.reduce((acc, c) => acc + (c.score / (weights[targetType] || 1)), 0);
+        mainNumber = getScore(totalRaw, targetType);
+        subTitle = `Total Raw: ${Math.round(totalRaw)} ${lastEntry.unit}`;
       }
-      typeData.forEach(item => { if (daysMap[item.date] !== undefined) daysMap[item.date] += item.value; });
-      processedData = Object.entries(daysMap).map(([date, val]) => ({
-        value: val,
-        score: calcScore(val),
-        label: date.slice(5),
-        type: targetType
-      }));
+    } 
+    // 模式 B & C: Combined / Multi
+    else {
+      const isMulti = displayConfig.mode === 'multi';
+      title = isMulti ? "MULTI METRICS VIEW" : "COMBINED ENERGY";
+      
+      // ✅【核心修改】根据模式读取对应的数组
+      const selected = isMulti 
+        ? (displayConfig.multiMetrics || []) 
+        : (displayConfig.combinedMetrics || []);
+      
+      if (isMulti) {
+          selected.forEach((metric, idx) => {
+              chartAreas.push({ key: metric, color: COLORS[idx % COLORS.length], fill: false });
+          });
+      } else {
+          chartAreas.push({ key: 'totalScore', color: '#60A5FA', fill: true });
+      }
+
+      const bucketMap = {};
+      const isHour = viewMode === 'hour';
+      const isRaw = viewMode === 'raw';
+      
+      if (isRaw) {
+          const filtered = allData.filter(i => selected.includes(i.type)).slice(-30);
+          processedData = filtered.map((item) => {
+              const point = { label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+              if (isMulti) {
+                  point[item.type] = getScore(item.value, item.type);
+              } else {
+                  point.totalScore = getScore(item.value, item.type);
+              }
+              return point;
+          });
+          const last = filtered[filtered.length-1];
+          mainNumber = last ? getScore(last.value, last.type) : 0;
+          subTitle = "Recent Activities";
+      } 
+      else {
+          if (isHour) {
+              new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
+          } else {
+              for(let i=6; i>=0; i--) { 
+                  const d = new Date(); d.setDate(d.getDate()-i); 
+                  bucketMap[d.toISOString().split('T')[0]] = {}; 
+              }
+          }
+
+          allData.filter(i => selected.includes(i.type)).forEach(i => {
+               const key = isHour ? new Date(i.timestamp).getHours() : i.date;
+               const isToday = new Date(i.timestamp).toDateString() === new Date().toDateString();
+               if (bucketMap[key] && (viewMode === 'day' || isToday)) {
+                   const s = getScore(i.value, i.type);
+                   if (isMulti) {
+                       bucketMap[key][i.type] = (bucketMap[key][i.type] || 0) + s;
+                   } else {
+                       bucketMap[key].totalScore = (bucketMap[key].totalScore || 0) + s;
+                   }
+               }
+          });
+
+          const currentHour = new Date().getHours();
+          processedData = Object.entries(bucketMap).map(([k, vals]) => {
+              if (isHour && parseInt(k) > currentHour) return null;
+              if (isMulti) {
+                  selected.forEach(metric => { if (vals[metric] === undefined) vals[metric] = 0; });
+              } else {
+                  if (vals.totalScore === undefined) vals.totalScore = 0;
+              }
+              return { label: isHour ? `${k}:00` : k.slice(5), ...vals };
+          }).filter(Boolean);
+
+          let totalSum = 0;
+          processedData.forEach(p => {
+              if (isMulti) {
+                  selected.forEach(m => totalSum += (p[m] || 0));
+              } else {
+                  totalSum += (p.totalScore || 0);
+              }
+          });
+          mainNumber = Math.round(totalSum);
+          subTitle = `Total Weighted Score (${viewMode === 'hour' ? 'Today' : '7 Days'})`;
+      }
     }
 
-    const totalRaw = processedData.reduce((acc, cur) => acc + cur.value, 0);
-    const totalScore = calcScore(totalRaw);
+    return { chartData: processedData, displayInfo: { title, subTitle, mainNumber }, areas: chartAreas, selectedMetrics: (displayConfig.mode === 'multi' ? displayConfig.multiMetrics : displayConfig.combinedMetrics) };
+  }, [allData, viewMode, weights, displayConfig]);
 
-    return { 
-      chartData: processedData, 
-      currentMetric: lastEntry,
-      stats: { totalRaw, totalScore, currentWeight }
-    };
-  }, [allData, viewMode, weights]);
-
-  if (!currentMetric) return null;
+  if (!displayInfo) return null;
 
   return (
     <div className="w-screen h-screen overflow-hidden relative pointer-events-none">
-      
-      {/* 交互按钮 */}
       <div 
         className="absolute bottom-[42vh] right-16 flex gap-2 z-10 pointer-events-auto"
         onMouseEnter={() => window.api.setIgnoreMouseEvents(false)}
@@ -85,9 +185,7 @@ const WallpaperOverlay = () => {
             onClick={() => setViewMode(mode)}
             className={`
               px-3 py-1 text-xs uppercase tracking-widest rounded-full border transition-all cursor-pointer
-              ${viewMode === mode 
-                ? 'bg-white text-black border-white font-bold' 
-                : 'bg-black/20 text-white/40 border-white/10 hover:bg-white/10 hover:text-white'}
+              ${viewMode === mode ? 'bg-white text-black border-white font-bold' : 'bg-black/20 text-white/40 border-white/10 hover:bg-white/10 hover:text-white'}
             `}
           >
             {mode === 'raw' ? 'Latest' : mode}
@@ -95,78 +193,61 @@ const WallpaperOverlay = () => {
         ))}
       </div>
 
-      {/* 图表层 */}
       <div className="absolute bottom-0 left-0 w-full h-[40vh] opacity-80">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={chartData}>
             <defs>
-              <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#cbd5e1" stopOpacity={0.3}/>
-                <stop offset="95%" stopColor="#cbd5e1" stopOpacity={0}/>
+              <linearGradient id="gradFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#fff" stopOpacity={0.1}/>
+                <stop offset="95%" stopColor="#fff" stopOpacity={0}/>
               </linearGradient>
               <filter id="glow">
                 <feGaussianBlur stdDeviation="3" result="coloredBlur" />
                 <feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge>
               </filter>
             </defs>
-
-            <XAxis 
-              dataKey="label" 
-              axisLine={false} 
-              tickLine={false} 
-              tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} 
-              dy={10}
-            />
-            
-            {/* ✅ 这里是新增的纵轴显示配置 */}
-            <YAxis 
-              domain={['auto', 'auto']} 
-              orientation="right"
-              tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 10, fontFamily: 'monospace' }} 
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={(val) => Math.round(val)}
-              width={40}
-            >
-              <Label 
-                value="PTS" 
-                offset={10} 
-                position="insideTopRight" 
-                style={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 'bold' }} 
-              />
+            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} dy={10} />
+            <YAxis domain={['auto', 'auto']} orientation="right" tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} tickFormatter={(val) => Math.round(val)} width={40}>
+              <Label value="PTS" offset={10} position="insideTopRight" style={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 'bold' }} />
             </YAxis>
-            
-            <Area 
-              type="monotone" 
-              dataKey="score" 
-              stroke="#f1f5f9" 
-              strokeWidth={3}
-              fill="url(#colorValue)" 
-              filter="url(#glow)" 
-              animationDuration={1000}
-            />
+            {areas.map((area) => (
+                <Area 
+                  key={area.key}
+                  connectNulls={true}
+                  type="monotone" 
+                  dataKey={area.key} 
+                  stroke={area.color} 
+                  strokeWidth={3}
+                  fill={area.fill ? "url(#gradFill)" : "none"} 
+                  filter="url(#glow)" 
+                  animationDuration={1000}
+                />
+            ))}
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
-      {/* 数据看板 */}
       <div className="absolute top-16 right-16 text-slate-200 text-right select-none transition-all">
-        <p className="text-xs font-bold tracking-[0.3em] opacity-40 uppercase mb-[-5px]">
-          {currentMetric.type} · {viewMode.toUpperCase()}
+        <p className="text-xs font-bold tracking-[0.3em] opacity-40 uppercase mb-[-5px] text-blue-200">
+          {displayInfo.title}
         </p>
 
         <h1 className="text-7xl font-thin tracking-tighter drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
-          {viewMode === 'raw' ? (stats.currentWeight * currentMetric.value).toFixed(0) : stats.totalScore.toFixed(0)}
+          {displayInfo.mainNumber}
           <span className="text-xl ml-3 font-normal opacity-80 text-yellow-400/80">PTS</span>
         </h1>
         
         <div className="text-sm opacity-50 mt-2 font-mono flex flex-col items-end">
-          <span>
-             Raw: {viewMode === 'raw' ? currentMetric.value : stats.totalRaw} {currentMetric.unit}
-          </span>
-          <span className="text-xs opacity-60">
-             (Weight: x{stats.currentWeight})
-          </span>
+          <span>{displayInfo.subTitle}</span>
+          {displayConfig.mode === 'multi' && (
+              <div className="flex gap-2 mt-2">
+                  {(displayConfig.multiMetrics || []).map((m, idx) => (
+                      <span key={m} style={{color: COLORS[idx % COLORS.length]}} className="text-[10px] font-bold">
+                          ● {m}
+                      </span>
+                  ))}
+              </div>
+          )}
         </div>
       </div>
     </div>

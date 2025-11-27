@@ -106,6 +106,24 @@ app.whenReady().then(() => {
 
 // --- IPC 通信逻辑 ---
 
+// 【新增】获取显示配置
+ipcMain.handle('get-display-config', () => {
+  return store.get('display-config', { 
+    mode: 'single', 
+    // ❌ 以前只有一个 selectedMetrics
+    // ✅ 现在拆分为两个独立的列表
+    combinedMetrics: [], 
+    multiMetrics: [] 
+  });
+});
+
+// 【新增】保存显示配置
+ipcMain.on('save-display-config', (event, config) => {
+  store.set('display-config', config);
+  // 通知壁纸层刷新
+  if (wallpaperWin) wallpaperWin.webContents.send('display-config-updated', config);
+});
+
 // 1. 获取初始数据
 ipcMain.handle('get-data', () => {
   return store.get('stats', []);

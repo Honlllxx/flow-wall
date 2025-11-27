@@ -23,5 +23,9 @@ contextBridge.exposeInMainWorld('api', {
   saveMetrics: (metrics) => ipcRenderer.send('save-metrics', metrics),
   onMetricsUpdate: (callback) => ipcRenderer.on('metrics-updated', (event, metrics) => callback(metrics)),
 
-
+  // ✅【新增】显示配置接口
+  getDisplayConfig: () => ipcRenderer.invoke('get-display-config'),
+  saveDisplayConfig: (config) => ipcRenderer.send('save-display-config', config),
+  onDisplayConfigUpdate: (callback) => ipcRenderer.on('display-config-updated', (event, config) => callback(config)),
+  
 });
