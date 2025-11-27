@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 强制背景透明 */
+html, body, #root {
+  background-color: transparent !important;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* 防止出现滚动条 */
+}
+
+/* 允许鼠标穿透的通用设置 */
+body {
+  pointer-events: none; /* 默认鼠标穿透 */
+  user-select: none;    /* 禁止选中文字 */
+}
+
+/* 需要交互的元素（如输入框、按钮）需要加这个类 */
+.interactive {
+  pointer-events: auto;
+}
+
+/* 自定义滚动条样式 */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px; /* 极细滚动条 */
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
