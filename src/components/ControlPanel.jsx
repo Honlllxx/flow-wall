@@ -19,6 +19,9 @@ const ICON_MAP = {
 
 const AVAILABLE_ICONS = ['star', 'code', 'music', 'heart', 'hash', 'smile', 'book', 'activity', 'zap', 'coffee'];
 
+// 默认颜色池（用于新建指标时的随机默认色）
+const DEFAULT_COLORS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
+
 const ControlPanel = () => {
   const [view, setView] = useState('record'); 
   const [step, setStep] = useState(1);
@@ -29,11 +32,10 @@ const ControlPanel = () => {
   const [weights, setWeights] = useState({});
   const [metrics, setMetrics] = useState([]);
   
-  // ✅【修改】分离数据结构
   const [displayConfig, setDisplayConfig] = useState({ 
     mode: 'single', 
-    combinedMetrics: [], // 专门用于 Combined 模式
-    multiMetrics: []     // 专门用于 Multi 模式
+    combinedMetrics: [],
+    multiMetrics: []
   });
 
   const [newMetricName, setNewMetricName] = useState('');
@@ -82,12 +84,25 @@ const ControlPanel = () => {
   const handleSaveWeights = () => {
     window.api.saveWeights(weights);
     window.api.saveDisplayConfig(displayConfig);
+    // 同时保存指标颜色的更改（metrics state 已经更新了，但要持久化）
+    window.api.saveMetrics(metrics);
     setView('record');
   };
 
   const handleAddMetric = () => {
     if (!newMetricName || !newMetricUnit) return;
-    const newMetric = { id: Date.now().toString(), label: newMetricName, unit: newMetricUnit, iconKey: newMetricIcon };
+    
+    // 随机分配一个默认颜色
+    const randomColor = DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)];
+
+    const newMetric = { 
+      id: Date.now().toString(), 
+      label: newMetricName, 
+      unit: newMetricUnit, 
+      iconKey: newMetricIcon,
+      color: randomColor // ✅ 新增颜色字段
+    };
+    
     const updatedMetrics = [...metrics, newMetric];
     setMetrics(updatedMetrics);
     window.api.saveMetrics(updatedMetrics);
@@ -106,21 +121,27 @@ const ControlPanel = () => {
     window.api.saveMetrics(updated);
   };
 
-  // ✅【核心修改】根据当前模式，操作不同的数组
   const toggleMetricSelection = (label) => {
     const isMultiMode = displayConfig.mode === 'multi';
     const targetKey = isMultiMode ? 'multiMetrics' : 'combinedMetrics';
-    
     const currentList = displayConfig[targetKey] || [];
     let newList;
-    
     if (currentList.includes(label)) {
       newList = currentList.filter(l => l !== label);
     } else {
       newList = [...currentList, label];
     }
-    
     setDisplayConfig({ ...displayConfig, [targetKey]: newList });
+  };
+
+  // ✅【新增】更新颜色
+  const handleColorChange = (metricId, newColor) => {
+    const updatedMetrics = metrics.map(m => 
+      m.id === metricId ? { ...m, color: newColor } : m
+    );
+    setMetrics(updatedMetrics);
+    // 注意：这里我们不立即调用 saveMetrics，而是等用户点左上角 SAVE 时统一保存
+    // 这样可以避免频繁写入文件
   };
 
   return (
@@ -149,7 +170,7 @@ const ControlPanel = () => {
           </button>
         )}
         {view === 'settings' && (
-           <button onClick={() => { window.api.getWeights().then(setWeights); window.api.getDisplayConfig().then(setDisplayConfig); setView('record'); }} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors">
+           <button onClick={() => { window.api.getWeights().then(setWeights); window.api.getDisplayConfig().then(setDisplayConfig); window.api.getMetrics().then(setMetrics); setView('record'); }} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors">
              <RotateCcw size={18} />
            </button>
         )}
@@ -164,7 +185,9 @@ const ControlPanel = () => {
               <div className="grid grid-cols-2 gap-3">
                 {metrics.map(m => (
                   <button key={m.id} onClick={() => handleSelect(m)} className="flex flex-col items-center justify-center p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-all hover:scale-105 border border-transparent hover:border-white/20 shrink-0">
-                    <div className="mb-1 opacity-80 text-blue-300">{ICON_MAP[m.iconKey] || <Hash size={20}/>}</div>
+                    <div className="mb-1 opacity-80" style={{ color: m.color || '#60A5FA' }}>
+                        {ICON_MAP[m.iconKey] || <Hash size={20}/>}
+                    </div>
                     <span className="text-sm truncate max-w-full">{m.label}</span>
                   </button>
                 ))}
@@ -208,24 +231,14 @@ const ControlPanel = () => {
         <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
           <h2 className="text-center text-white/50 text-xs mb-4 tracking-widest uppercase">Display Mode</h2>
           
-          {/* 模式切换 */}
           <div className="mx-2 mb-4 p-1 bg-white/5 rounded-lg flex border border-white/10">
-            <button 
-              onClick={() => setDisplayConfig({ ...displayConfig, mode: 'single' })}
-              className={`flex-1 flex flex-col items-center justify-center py-2 rounded transition-all ${displayConfig.mode === 'single' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}
-            >
+            <button onClick={() => setDisplayConfig({ ...displayConfig, mode: 'single' })} className={`flex-1 flex flex-col items-center justify-center py-2 rounded transition-all ${displayConfig.mode === 'single' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}>
               <Eye size={14} className="mb-1"/> <span className="text-[10px]">Auto</span>
             </button>
-            <button 
-              onClick={() => setDisplayConfig({ ...displayConfig, mode: 'combined' })}
-              className={`flex-1 flex flex-col items-center justify-center py-2 rounded transition-all ${displayConfig.mode === 'combined' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}
-            >
+            <button onClick={() => setDisplayConfig({ ...displayConfig, mode: 'combined' })} className={`flex-1 flex flex-col items-center justify-center py-2 rounded transition-all ${displayConfig.mode === 'combined' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}>
               <Layers size={14} className="mb-1"/> <span className="text-[10px]">Combined</span>
             </button>
-            <button 
-              onClick={() => setDisplayConfig({ ...displayConfig, mode: 'multi' })}
-              className={`flex-1 flex flex-col items-center justify-center py-2 rounded transition-all ${displayConfig.mode === 'multi' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}
-            >
+            <button onClick={() => setDisplayConfig({ ...displayConfig, mode: 'multi' })} className={`flex-1 flex flex-col items-center justify-center py-2 rounded transition-all ${displayConfig.mode === 'multi' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}>
               <GitGraph size={14} className="mb-1"/> <span className="text-[10px]">Multi-View</span>
             </button>
           </div>
@@ -233,11 +246,9 @@ const ControlPanel = () => {
           <div className="flex-1 space-y-3 overflow-y-auto px-2 custom-scrollbar pb-2">
             
             {metrics.map(m => {
-              // ✅【核心修改】根据当前 mode 读取不同的列表来判断是否勾选
               const isMultiMode = displayConfig.mode === 'multi';
               const currentList = isMultiMode ? (displayConfig.multiMetrics || []) : (displayConfig.combinedMetrics || []);
               const isSelected = currentList.includes(m.label);
-              
               const isModeActive = displayConfig.mode !== 'single';
               
               return (
@@ -257,6 +268,7 @@ const ControlPanel = () => {
                     <div className="opacity-70 text-blue-400 shrink-0">
                         {ICON_MAP[m.iconKey] || <Hash size={18}/>}
                     </div>
+                    
                     <div className="flex flex-col">
                       <span className="text-sm font-medium truncate">{m.label}</span>
                       <span className="text-[10px] text-white/30">{m.unit}</span>
@@ -264,12 +276,25 @@ const ControlPanel = () => {
                   </div>
                   
                   <div className="flex items-center gap-2">
-                     <span className="text-[10px] text-white/30">Wt:</span>
+                    
+                    {/* ✅【新增】颜色选择器 */}
+                    <div className="relative group/color">
+                      <div className="w-4 h-4 rounded-full border border-white/20 overflow-hidden cursor-pointer" style={{ backgroundColor: m.color || '#60A5FA' }}></div>
+                      <input 
+                        type="color" 
+                        value={m.color || '#60A5FA'}
+                        onChange={(e) => handleColorChange(m.id, e.target.value)}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        title="Change Color"
+                      />
+                    </div>
+
+                     <span className="text-[10px] text-white/30 ml-1">Wt:</span>
                      <input 
                       type="number" step="0.1"
                       value={weights[m.label] !== undefined ? weights[m.label] : 1}
                       onChange={(e) => setWeights({ ...weights, [m.label]: parseFloat(e.target.value) })}
-                      className="w-12 bg-black/20 border border-white/10 rounded p-1 text-center text-xs focus:outline-none focus:border-blue-500"
+                      className="w-10 bg-black/20 border border-white/10 rounded p-1 text-center text-xs focus:outline-none focus:border-blue-500"
                     />
                     <button onClick={() => handleDeleteMetric(m.id)} className="p-1.5 text-white/20 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors">
                       <Trash2 size={14} />

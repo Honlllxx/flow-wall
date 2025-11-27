@@ -1,16 +1,20 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { AreaChart, Area, ResponsiveContainer, YAxis, XAxis, Label } from 'recharts';
 
+// 预设颜色池
 const COLORS = [
   '#60A5FA', '#F87171', '#34D399', '#FBBF24', 
   '#A78BFA', '#F472B6', '#2DD4BF', '#FB923C',
 ];
+
+const FALLBACK_COLORS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
 
 const WallpaperOverlay = () => {
   const [allData, setAllData] = useState([]);
   const [viewMode, setViewMode] = useState('raw');
   const [weights, setWeights] = useState({});
   const [displayConfig, setDisplayConfig] = useState({ mode: 'single', combinedMetrics: [], multiMetrics: [] });
+  const [metrics, setMetrics] = useState([]);
 
   useEffect(() => {
     window.api.getData().then(setAllData);
@@ -19,10 +23,17 @@ const WallpaperOverlay = () => {
     window.api.onWeightsUpdate(setWeights);
     window.api.getDisplayConfig().then(setDisplayConfig);
     window.api.onDisplayConfigUpdate(setDisplayConfig);
+    window.api.getMetrics().then(setMetrics);
+    window.api.onMetricsUpdate(setMetrics);
   }, []);
 
   const { chartData, displayInfo, areas } = useMemo(() => {
     if (allData.length === 0) return { chartData: [], displayInfo: null, areas: [] };
+
+    const getMetricColor = (label, index) => {
+      const m = metrics.find(item => item.label === label);
+      return m?.color || FALLBACK_COLORS[index % FALLBACK_COLORS.length];
+    };
 
     const getScore = (val, type) => {
       const w = weights[type] || 1;
@@ -35,13 +46,16 @@ const WallpaperOverlay = () => {
     let mainNumber = 0;
     let chartAreas = [];
 
+    // =========================================================
     // 模式 A: Auto Single
+    // =========================================================
     if (displayConfig.mode === 'single') {
       const lastEntry = allData[allData.length - 1];
       const targetType = lastEntry.type;
       title = `${targetType} · ${viewMode.toUpperCase()}`;
       
-      chartAreas.push({ key: 'score', color: '#f1f5f9', fill: true });
+      const singleColor = getMetricColor(targetType, 0);
+      chartAreas.push({ key: 'score', color: singleColor, fill: true });
 
       if (viewMode === 'raw') {
         const typeData = allData.filter(i => i.type === targetType).slice(-20);
@@ -83,19 +97,19 @@ const WallpaperOverlay = () => {
         subTitle = `Total Raw: ${Math.round(totalRaw)} ${lastEntry.unit}`;
       }
     } 
+    // =========================================================
     // 模式 B & C: Combined / Multi
+    // =========================================================
     else {
       const isMulti = displayConfig.mode === 'multi';
       title = isMulti ? "MULTI METRICS VIEW" : "COMBINED ENERGY";
-      
-      // ✅【核心修改】根据模式读取对应的数组
       const selected = isMulti 
         ? (displayConfig.multiMetrics || []) 
         : (displayConfig.combinedMetrics || []);
       
       if (isMulti) {
           selected.forEach((metric, idx) => {
-              chartAreas.push({ key: metric, color: COLORS[idx % COLORS.length], fill: false });
+              chartAreas.push({ key: metric, color: getMetricColor(metric, idx), fill: false });
           });
       } else {
           chartAreas.push({ key: 'totalScore', color: '#60A5FA', fill: true });
@@ -106,11 +120,22 @@ const WallpaperOverlay = () => {
       const isRaw = viewMode === 'raw';
       
       if (isRaw) {
+          // ✅【Raw 模式核心修改】：补 0 逻辑
           const filtered = allData.filter(i => selected.includes(i.type)).slice(-30);
           processedData = filtered.map((item) => {
               const point = { label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+              
               if (isMulti) {
-                  point[item.type] = getScore(item.value, item.type);
+                  // 遍历所有选中的指标
+                  selected.forEach(metric => {
+                      if (metric === item.type) {
+                          // 如果是当前记录的指标，计算分数
+                          point[metric] = getScore(item.value, item.type);
+                      } else {
+                          // 如果不是，强制设为 0（这就是你想要的补0逻辑）
+                          point[metric] = 0;
+                      }
+                  });
               } else {
                   point.totalScore = getScore(item.value, item.type);
               }
@@ -121,6 +146,7 @@ const WallpaperOverlay = () => {
           subTitle = "Recent Activities";
       } 
       else {
+          // ✅【Hour / Day 模式】：保持补 0 逻辑
           if (isHour) {
               new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
           } else {
@@ -146,11 +172,16 @@ const WallpaperOverlay = () => {
           const currentHour = new Date().getHours();
           processedData = Object.entries(bucketMap).map(([k, vals]) => {
               if (isHour && parseInt(k) > currentHour) return null;
+              
+              // 强制补0：确保每个时间点的每个指标都有值（0 或 实际值）
               if (isMulti) {
-                  selected.forEach(metric => { if (vals[metric] === undefined) vals[metric] = 0; });
+                  selected.forEach(metric => { 
+                      if (vals[metric] === undefined) vals[metric] = 0; 
+                  });
               } else {
                   if (vals.totalScore === undefined) vals.totalScore = 0;
               }
+
               return { label: isHour ? `${k}:00` : k.slice(5), ...vals };
           }).filter(Boolean);
 
@@ -167,13 +198,18 @@ const WallpaperOverlay = () => {
       }
     }
 
-    return { chartData: processedData, displayInfo: { title, subTitle, mainNumber }, areas: chartAreas, selectedMetrics: (displayConfig.mode === 'multi' ? displayConfig.multiMetrics : displayConfig.combinedMetrics) };
-  }, [allData, viewMode, weights, displayConfig]);
+    return { 
+      chartData: processedData, 
+      displayInfo: { title, subTitle, mainNumber }, 
+      areas: chartAreas 
+    };
+  }, [allData, viewMode, weights, displayConfig, metrics]);
 
   if (!displayInfo) return null;
 
   return (
     <div className="w-screen h-screen overflow-hidden relative pointer-events-none">
+      
       <div 
         className="absolute bottom-[42vh] right-16 flex gap-2 z-10 pointer-events-auto"
         onMouseEnter={() => window.api.setIgnoreMouseEvents(false)}
@@ -210,14 +246,17 @@ const WallpaperOverlay = () => {
             <YAxis domain={['auto', 'auto']} orientation="right" tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} tickFormatter={(val) => Math.round(val)} width={40}>
               <Label value="PTS" offset={10} position="insideTopRight" style={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 'bold' }} />
             </YAxis>
+            
             {areas.map((area) => (
                 <Area 
                   key={area.key}
+                  // 即便补了0，connectNulls 也是好的安全措施
                   connectNulls={true}
                   type="monotone" 
                   dataKey={area.key} 
                   stroke={area.color} 
                   strokeWidth={3}
+                  // Multi不填充
                   fill={area.fill ? "url(#gradFill)" : "none"} 
                   filter="url(#glow)" 
                   animationDuration={1000}
@@ -241,11 +280,15 @@ const WallpaperOverlay = () => {
           <span>{displayInfo.subTitle}</span>
           {displayConfig.mode === 'multi' && (
               <div className="flex gap-2 mt-2">
-                  {(displayConfig.multiMetrics || []).map((m, idx) => (
-                      <span key={m} style={{color: COLORS[idx % COLORS.length]}} className="text-[10px] font-bold">
-                          ● {m}
-                      </span>
-                  ))}
+                  {(displayConfig.multiMetrics || []).map((mName) => {
+                      const mDef = metrics.find(i => i.label === mName);
+                      const color = mDef?.color || FALLBACK_COLORS[0];
+                      return (
+                          <span key={mName} style={{color: color}} className="text-[10px] font-bold">
+                              ● {mName}
+                          </span>
+                      );
+                  })}
               </div>
           )}
         </div>
