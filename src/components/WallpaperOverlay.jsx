@@ -9,15 +9,15 @@ const COLORS = [
 const FALLBACK_COLORS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
 
 const STANDARD_RANGES = [
-  { id: 'raw', label: 'Latest' },
-  { id: 'hour', label: 'Today' },
-  { id: 'day', label: 'Days' },
-  { id: 'week', label: 'Week' },
-  { id: 'month', label: 'Month' },
-  { id: 'year', label: 'Year' },
+  { id: 'raw', label: 'Latest', grouping: 'raw' },
+  { id: 'hour', label: 'Today', grouping: 'hour' },
+  { id: 'day', label: 'Days', grouping: 'day' },
+  { id: 'week', label: '12 Weeks', grouping: 'week' },
+  { id: 'month', label: '12 Months', grouping: 'month' },
+  { id: 'year', label: 'Year', grouping: 'month' },
 ];
 
-// ✅ 辅助工具：获取本地日期字符串 YYYY-MM-DD
+// 辅助：获取本地日期字符串 YYYY-MM-DD
 const getLocalDayKey = (d) => {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -25,7 +25,7 @@ const getLocalDayKey = (d) => {
   return `${year}-${month}-${day}`;
 };
 
-// ✅ 辅助工具：获取本地月份字符串 YYYY-MM
+// 辅助：获取本地月份字符串 YYYY-MM
 const getLocalMonthKey = (d) => {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -73,40 +73,38 @@ const WallpaperOverlay = () => {
 
     const combinedColor = displayConfig.combinedColor || '#60A5FA';
 
-    // --- 1. 时间窗口计算 (Time Window) ---
-    const getStartDate = (mode) => {
-      const now = new Date();
-      now.setHours(0, 0, 0, 0); // Reset time to start of day
-      
-      if (mode === 'hour') return now; 
-      
-      const d = new Date(now);
-      if (mode === 'day') {
-          d.setDate(d.getDate() - 6); // Past 7 days (including today)
-      }
-      else if (mode === 'week') {
-          const day = d.getDay() || 7; // Get current day (1-7), Monday is 1
-          d.setDate(d.getDate() - day + 1); // Set to Monday of this week
-      }
-      else if (mode === 'month') {
-          d.setDate(1); // 1st of this month
-      }
-      else if (mode === 'year') {
-          d.setMonth(0, 1); // Jan 1st of this year
-      }
-      else if (mode.startsWith('custom_')) {
-          const custom = (displayConfig.customRanges || []).find(r => r.id === mode);
-          if (custom) d.setDate(d.getDate() - (custom.days - 1));
-      }
-      return d;
-    };
+    // --- 1. 时间窗口计算 ---
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    let startDate = new Date(todayStart);
+    let grouping = 'day'; 
+    let rangeLabel = 'CUSTOM';
 
-    const startDate = getStartDate(viewMode);
-    const isHourly = viewMode === 'hour';
-    const isRaw = viewMode === 'raw';
+    const stdRange = STANDARD_RANGES.find(r => r.id === viewMode);
+    const customRange = (displayConfig.customRanges || []).find(r => r.id === viewMode);
+
+    if (stdRange) {
+        rangeLabel = stdRange.label;
+        grouping = stdRange.grouping;
+        if (viewMode === 'day') startDate.setDate(startDate.getDate() - 6);
+        else if (viewMode === 'week') startDate.setDate(startDate.getDate() - (7 * 11)); 
+        else if (viewMode === 'month' || viewMode === 'year') {
+            startDate.setMonth(startDate.getMonth() - 11); 
+            startDate.setDate(1); 
+        }
+    } else if (customRange) {
+        rangeLabel = customRange.label;
+        grouping = customRange.grouping || 'day';
+        // 计算起始日期：今天 - (总天数 - 1)
+        startDate.setDate(startDate.getDate() - (customRange.days - 1));
+    }
+
+    const isHourly = grouping === 'hour';
+    const isRaw = grouping === 'raw';
     const isYear = viewMode === 'year';
     
-    // --- 2. 确定当前显示的指标 ---
+    // --- 2. 确定激活指标 ---
     let activeMetrics = [];
     let combinedSelected = displayConfig.combinedMetrics || [];
     let multiSelected = displayConfig.multiMetrics || [];
@@ -122,7 +120,7 @@ const WallpaperOverlay = () => {
         activeMetrics = combinedSelected;
     }
 
-    // --- 3. 生成图表区域配置 ---
+    // --- 3. 生成图表区域 ---
     let chartAreas = [];
     if (displayConfig.mode === 'single') {
         if (activeMetrics.length > 0) {
@@ -139,12 +137,12 @@ const WallpaperOverlay = () => {
         }
     }
 
-    // --- 4. 数据聚合引擎 (Data Aggregation) ---
+    // --- 4. 数据处理 ---
     let processedData = [];
     let mainNumber = 0;
     
-    // >>> 分支 A: Raw 模式 (流水账)
     if (isRaw) { 
+        // ... (Raw 逻辑保持不变)
         let rawSourceData = allData;
         if (displayConfig.mode === 'single') {
              const targetType = activeMetrics[0];
@@ -153,19 +151,16 @@ const WallpaperOverlay = () => {
              rawSourceData = allData.filter(i => activeMetrics.includes(i.type));
         }
         
-        const filtered = rawSourceData.slice(-30); // 只看最近30条
-        
+        const filtered = rawSourceData.slice(-30);
         processedData = filtered.map(item => {
             const point = { 
                 label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
             };
-            
             if (displayConfig.mode === 'single') {
                 point.score = getScore(item.value, item.type);
             } else {
                 if (multiSelected.includes(item.type)) point[item.type] = getScore(item.value, item.type);
-                multiSelected.forEach(m => { if (m !== item.type) point[m] = 0; }); // 补0以显示起伏
-
+                multiSelected.forEach(m => { if (m !== item.type) point[m] = 0; }); 
                 if (combinedSelected.includes(item.type)) point.totalScore = getScore(item.value, item.type);
                 else if (displayConfig.mode === 'overlay' || displayConfig.mode === 'combined') point.totalScore = 0;
             }
@@ -177,69 +172,60 @@ const WallpaperOverlay = () => {
         else if (displayConfig.mode === 'combined') mainNumber = last ? (last.totalScore || 0) : 0;
         else mainNumber = last ? (last.totalScore || 0) : 0;
         
-        if (displayConfig.mode === 'multi') {
+        if (displayConfig.mode === 'multi' && filtered.length > 0) {
              const lastEntry = filtered[filtered.length-1];
-             mainNumber = lastEntry ? getScore(lastEntry.value, lastEntry.type) : 0;
+             mainNumber = getScore(lastEntry.value, lastEntry.type);
         }
     } 
-    // >>> 分支 B: 聚合模式 (Hour, Day, Week, Month, Year)
     else { 
+        // 聚合模式
         const bucketMap = {};
-        const now = new Date();
         
-        // --- 初始化时间桶 (X轴刻度) ---
-        if (isHourly) {
-            new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
-        } 
-        else if (isYear) {
-            // Year 模式：按月 (YYYY-MM)
-            for(let i=0; i<12; i++) {
-                const d = new Date(startDate);
-                d.setMonth(i);
-                // 仅生成到当前月份的桶，或者生成全年（这里生成全年）
-                const key = getLocalMonthKey(d);
-                bucketMap[key] = {};
+        // --- Key Generation ---
+        const getKey = (d) => {
+            if (grouping === 'hour') return (getLocalDayKey(d) === getLocalDayKey(now)) ? d.getHours() : null;
+            if (grouping === 'day') return getLocalDayKey(d);
+            if (grouping === 'week') {
+                const onejan = new Date(d.getFullYear(), 0, 1);
+                const week = Math.ceil((((d - onejan) / 86400000) + onejan.getDay() + 1) / 7);
+                return `${d.getFullYear()}-W${week}`;
             }
-        } 
-        else {
-            // Day/Week/Month/Custom 模式：按天 (YYYY-MM-DD)
-            // 关键修复：使用本地时间循环，确保 key 与数据中的 date 格式一致
+            if (grouping === 'month') return getLocalMonthKey(d);
+            if (typeof grouping === 'number') {
+                // 计算当前日期距离起始日期的天数差
+                // 为了避免时区问题，我们只比较日期部分
+                const startMidnight = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+                const currentMidnight = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                const diffTime = currentMidnight.getTime() - startMidnight.getTime();
+                const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)); 
+                
+                if (diffDays < 0) return null;
+                return Math.floor(diffDays / grouping); // 返回 0, 1, 2... 作为块索引
+            }
+            return null;
+        };
+
+        // --- Init Buckets ---
+        if (grouping === 'hour') {
+            new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
+        } else {
             let loopDate = new Date(startDate);
             let safety = 0;
-            // 循环直到 loopDate 超过今天
-            // 注意：比较时要忽略时分秒，或者简单对比 getLocalDayKey
-            const todayKey = getLocalDayKey(now);
-            
-            while (safety < 366) {
-                const key = getLocalDayKey(loopDate);
-                bucketMap[key] = {};
-                
-                if (key === todayKey) break; // 到了今天就停止
+            // 循环生成每一天，直到今天
+            while (loopDate <= now && safety < 1000) {
+                const key = getKey(loopDate);
+                if (key !== null) bucketMap[key] = {}; // 确保键存在
                 loopDate.setDate(loopDate.getDate() + 1);
                 safety++;
             }
         }
 
-        // --- 填充数据 ---
+        // --- Fill Data ---
         allData.filter(i => activeMetrics.includes(i.type) && new Date(i.timestamp) >= startDate).forEach(i => {
              const d = new Date(i.timestamp);
-             let key;
-             
-             if (isHourly) {
-                 if (getLocalDayKey(d) === getLocalDayKey(now)) key = d.getHours();
-                 else return;
-             }
-             else if (isYear) {
-                 key = getLocalMonthKey(d); // 使用 Local 月份 Key
-             }
-             else {
-                 key = i.date; // 使用 main.js 生成的本地 YYYY-MM-DD
-             }
-
-             // 如果这个 key 在我们的桶里（在显示范围内），则累加
+             const key = getKey(d);
              if (bucketMap[key]) {
                  const s = getScore(i.value, i.type);
-                 
                  if (displayConfig.mode === 'single') {
                      bucketMap[key].score = (bucketMap[key].score || 0) + s;
                  } else {
@@ -249,12 +235,12 @@ const WallpaperOverlay = () => {
              }
         });
 
-        // --- 扁平化数据并补 0 ---
+        // --- Flatten & Label Generation ---
         const currentHour = now.getHours();
         processedData = Object.entries(bucketMap).map(([k, vals]) => {
-            if (isHourly && parseInt(k) > currentHour) return null; // 未来时间不显示
+            if (grouping === 'hour' && parseInt(k) > currentHour) return null;
             
-            // 补 0 逻辑：确保线条连贯且正确归零
+            // 补 0
             if (displayConfig.mode === 'single') {
                 if (vals.score === undefined) vals.score = 0;
             } else {
@@ -264,21 +250,30 @@ const WallpaperOverlay = () => {
                     if (vals.totalScore === undefined) vals.totalScore = 0;
             }
 
-            // 生成 X 轴标签
+            // ✅ 【核心修复】Label Generation
             let label = k;
-            if (isHourly) label = `${k}:00`;
-            else if (isYear) {
-                const monthIndex = parseInt(k.split('-')[1]) - 1;
-                const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                label = monthNames[monthIndex] || k;
-            } else {
-                label = k.slice(5); // MM-DD
+            if (grouping === 'hour') label = `${k}:00`;
+            else if (grouping === 'day') label = k.slice(5); // MM-DD
+            else if (grouping === 'month') {
+                const m = parseInt(k.split('-')[1]);
+                label = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m-1] || k;
+            } 
+            else if (typeof grouping === 'number') {
+                // 自定义分组：根据块索引 k (0, 1, 2...) 反推日期
+                const blockIndex = parseInt(k);
+                // 计算该块的起始日期 = startDate + (blockIndex * grouping) days
+                const blockDate = new Date(startDate);
+                blockDate.setDate(blockDate.getDate() + (blockIndex * grouping));
+                
+                // 格式化为 MM-DD
+                const mStr = String(blockDate.getMonth() + 1).padStart(2, '0');
+                const dStr = String(blockDate.getDate()).padStart(2, '0');
+                label = `${mStr}-${dStr}`;
             }
 
             return { label, ...vals };
         }).filter(Boolean);
 
-        // 计算 Main Number (总分)
         let totalSum = 0;
         processedData.forEach(p => { 
             if (displayConfig.mode === 'single') totalSum += p.score;
@@ -288,11 +283,10 @@ const WallpaperOverlay = () => {
         mainNumber = Math.round(totalSum);
     }
 
-    // --- Titles & Subtitles ---
     let title = "";
     let subTitle = "";
     let rangeText = viewMode.toUpperCase().replace('CUSTOM_', '');
-    if(viewMode === 'day') rangeText = '7 DAYS'; // 修正显示文本
+    if(viewMode === 'day') rangeText = '7 DAYS';
     
     if (displayConfig.mode === 'single') {
         const targetType = activeMetrics[0] || 'NONE';
@@ -303,14 +297,27 @@ const WallpaperOverlay = () => {
         subTitle = `Period Total: ${mainNumber}`;
     }
 
-    // --- Goal Lines Logic ---
+    // --- Goal Lines (Calculate with Multiplier) ---
+    // ✅ 目标值根据分组倍率自动调整
+    let goalMultiplier = 1;
+    if (grouping === 'week') goalMultiplier = 7;
+    else if (grouping === 'month') goalMultiplier = 30; 
+    else if (typeof grouping === 'number') goalMultiplier = grouping; // 自定义天数倍率
+
     let refLines = [];
-    if (isHourly || isRaw) {
+    
+    // 只要有数据且不是 Raw 模式，就显示聚合后的目标线
+    // 或者在 Raw / Hour 模式下显示日目标
+    const shouldShowGoal = true; // 既然已经做了倍率计算，任何模式都可以显示目标线
+
+    if (shouldShowGoal) {
+        // Total Goal
         const showTotal = (displayConfig.mode === 'combined' || displayConfig.mode === 'overlay') && displayConfig.showCombinedGoal !== false && displayConfig.combinedGoal > 0;
         if (showTotal) {
-          refLines.push({ value: displayConfig.combinedGoal, color: '#FFFFFF', label: 'GOAL', opacity: 0.9, width: 2 });
+          refLines.push({ value: displayConfig.combinedGoal * goalMultiplier, color: '#FFFFFF', label: 'GOAL', opacity: 0.9, width: 2 });
         }
 
+        // Individual Goals
         const showIndivGlobal = displayConfig.showIndividualGoals !== false;
         const allowedModes = displayConfig.individualGoalModes || ['single', 'multi', 'overlay'];
         const isModeAllowed = allowedModes.includes(displayConfig.mode);
@@ -323,14 +330,16 @@ const WallpaperOverlay = () => {
             goalMetrics.forEach(mName => {
                 const mDef = metrics.find(m => m.label === mName);
                 if (mDef && mDef.target > 0 && mDef.showGoal !== false) {
-                    const goalVal = getScore(Number(mDef.target), mName);
-                    if (goalVal > 0) refLines.push({ value: goalVal, color: mDef.color || '#FFF', label: mName.toUpperCase(), opacity: 0.6, width: 1 });
+                    const baseScore = getScore(Number(mDef.target), mName);
+                    const finalTarget = baseScore * goalMultiplier;
+                    if (finalTarget > 0) {
+                        refLines.push({ value: finalTarget, color: mDef.color || '#FFF', label: mName.toUpperCase(), opacity: 0.6, width: 1 });
+                    }
                 }
             });
         }
     }
 
-    // Max Y
     const currentMaxData = Math.max(
         ...processedData.map(d => {
             const vals = Object.values(d).filter(v => typeof v === 'number');
@@ -340,7 +349,6 @@ const WallpaperOverlay = () => {
     const maxGoal = refLines.length > 0 ? Math.max(...refLines.map(l => l.value)) : 0;
     const finalMaxY = Math.max(currentMaxData, maxGoal) * 1.15;
 
-    // ✅ Generate Buttons
     const buttons = (displayConfig.visibleButtons || ['raw', 'hour', 'day']).map(id => {
         return STANDARD_RANGES.find(r => r.id === id);
     }).filter(Boolean);
@@ -363,24 +371,9 @@ const WallpaperOverlay = () => {
   return (
     <div className="w-screen h-screen overflow-hidden relative pointer-events-none">
       
-      <div 
-        className="absolute bottom-[42vh] right-16 flex gap-2 z-10 pointer-events-auto flex-wrap justify-end max-w-[600px]"
-        onMouseEnter={() => window.api.setIgnoreMouseEvents(false)}
-        onMouseLeave={() => window.api.setIgnoreMouseEvents(true, { forward: true })}
-      >
+      <div className="absolute bottom-[42vh] right-16 flex gap-2 z-10 pointer-events-auto flex-wrap justify-end max-w-[600px]" onMouseEnter={() => window.api.setIgnoreMouseEvents(false)} onMouseLeave={() => window.api.setIgnoreMouseEvents(true, { forward: true })}>
         {activeButtons.map(btn => (
-          <button
-            key={btn.id}
-            onClick={() => setViewMode(btn.id)}
-            className={`
-              px-3 py-1 text-xs uppercase tracking-widest rounded-full border transition-all cursor-pointer mb-1 ml-1
-              ${viewMode === btn.id 
-                ? 'bg-white text-black border-white font-bold' 
-                : 'bg-black/20 text-white/40 border-white/10 hover:bg-white/10 hover:text-white'}
-            `}
-          >
-            {btn.label}
-          </button>
+          <button key={btn.id} onClick={() => setViewMode(btn.id)} className={`px-3 py-1 text-xs uppercase tracking-widest rounded-full border transition-all cursor-pointer mb-1 ml-1 ${viewMode === btn.id ? 'bg-white text-black border-white font-bold' : 'bg-black/20 text-white/40 border-white/10 hover:bg-white/10 hover:text-white'}`}>{btn.label}</button>
         ))}
       </div>
 
@@ -388,73 +381,28 @@ const WallpaperOverlay = () => {
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={chartData}>
             <defs>
-              <linearGradient id="gradFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#fff" stopOpacity={0.15}/>
-                <stop offset="95%" stopColor="#fff" stopOpacity={0}/>
-              </linearGradient>
-              <linearGradient id="totalFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={areas.combinedColor || '#3B82F6'} stopOpacity={0.3}/> 
-                <stop offset="95%" stopColor={areas.combinedColor || '#3B82F6'} stopOpacity={0.05}/>
-              </linearGradient>
-              <linearGradient id="combinedLineFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={areas.combinedColor || '#60A5FA'} stopOpacity={0.2}/> 
-                <stop offset="95%" stopColor={areas.combinedColor || '#60A5FA'} stopOpacity={0}/>
-              </linearGradient>
-              <filter id="glow">
-                <feGaussianBlur stdDeviation="2" result="coloredBlur" />
-                <feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge>
-              </filter>
+              <linearGradient id="gradFill" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#fff" stopOpacity={0.15}/><stop offset="95%" stopColor="#fff" stopOpacity={0}/></linearGradient>
+              <linearGradient id="totalFill" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={areas.combinedColor || '#3B82F6'} stopOpacity={0.3}/><stop offset="95%" stopColor={areas.combinedColor || '#3B82F6'} stopOpacity={0.05}/></linearGradient>
+              <linearGradient id="combinedLineFill" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={areas.combinedColor || '#60A5FA'} stopOpacity={0.2}/><stop offset="95%" stopColor={areas.combinedColor || '#60A5FA'} stopOpacity={0}/></linearGradient>
+              <filter id="glow"><feGaussianBlur stdDeviation="2" result="coloredBlur" /><feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
             </defs>
             <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} dy={10} />
             <YAxis domain={[0, maxY || 100]} orientation="right" tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} tickFormatter={(val) => Math.round(val)} width={40}>
               <Label value="PTS" offset={10} position="insideTopRight" style={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 'bold' }} />
             </YAxis>
-            
             {areas.map((area) => (
-                <Area 
-                  key={area.key}
-                  connectNulls={true} // ✅ 强制开启断点连接，配合补0逻辑实现流畅落地
-                  type="monotone" 
-                  dataKey={area.key} 
-                  stroke={area.strokeWidth === 0 ? "transparent" : area.color}
-                  strokeWidth={area.strokeWidth}
-                  fill={area.fill ? `url(#${area.gradientId})` : "none"} 
-                  filter={area.fill ? "" : "url(#glow)"} 
-                  animationDuration={1000}
-                />
+                <Area key={area.key} connectNulls={true} type="monotone" dataKey={area.key} stroke={area.strokeWidth === 0 ? "transparent" : area.color} strokeWidth={area.strokeWidth} fill={area.fill ? `url(#${area.gradientId})` : "none"} filter={area.fill ? "" : "url(#glow)"} animationDuration={1000} />
             ))}
-
             {referenceLines.map((line, index) => (
-              <ReferenceLine 
-                key={index}
-                y={line.value} 
-                stroke={line.color} 
-                strokeOpacity={line.opacity || 0.8}
-                strokeDasharray="4 4" 
-                strokeWidth={line.width || 1.5}
-                label={{ 
-                  value: line.label, 
-                  position: 'insideBottomRight', 
-                  fill: line.color, 
-                  fontSize: 9,
-                  fontWeight: 'bold',
-                  dy: -5
-                }} 
-              />
+              <ReferenceLine key={index} y={line.value} stroke={line.color} strokeOpacity={line.opacity || 0.8} strokeDasharray="4 4" strokeWidth={line.width || 1.5} label={{ value: line.label, position: 'insideBottomRight', fill: line.color, fontSize: 9, fontWeight: 'bold', dy: -5 }} />
             ))}
-
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
       <div className="absolute top-16 right-16 text-slate-200 text-right select-none transition-all">
-        <p className="text-xs font-bold tracking-[0.3em] opacity-40 uppercase mb-[-5px] text-blue-200">
-          {displayInfo.title}
-        </p>
-        <h1 className="text-7xl font-thin tracking-tighter drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
-          {displayInfo.mainNumber}
-          <span className="text-xl ml-3 font-normal opacity-80 text-yellow-400/80">PTS</span>
-        </h1>
+        <p className="text-xs font-bold tracking-[0.3em] opacity-40 uppercase mb-[-5px] text-blue-200">{displayInfo.title}</p>
+        <h1 className="text-7xl font-thin tracking-tighter drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">{displayInfo.mainNumber}<span className="text-xl ml-3 font-normal opacity-80 text-yellow-400/80">PTS</span></h1>
         <div className="text-sm opacity-50 mt-2 font-mono flex flex-col items-end">
           <span>{displayInfo.subTitle}</span>
           {(displayConfig.mode === 'multi' || displayConfig.mode === 'overlay') && (
