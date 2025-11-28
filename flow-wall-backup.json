@@ -1,5 +1,5 @@
 {
-  "timestamp": 1764298487312,
+  "timestamp": 1764301135341,
   "version": "1.0",
   "stats": [
     {
@@ -307,28 +307,32 @@
       "label": "健身",
       "unit": "分钟",
       "iconKey": "activity",
-      "color": "#c94418"
+      "color": "#c94418",
+      "target": 240127
     },
     {
       "id": "focus",
       "label": "专注",
       "unit": "小时",
       "iconKey": "zap",
-      "color": "#ca2bc5"
+      "color": "#ca2bc5",
+      "target": 263
     },
     {
       "id": "1764229783246",
       "label": "睡觉",
       "unit": "25",
       "iconKey": "activity",
-      "color": "#27be2c"
+      "color": "#27be2c",
+      "target": 5003
     },
     {
       "id": "1764229803630",
       "label": "coding",
       "unit": "20",
       "iconKey": "coffee",
-      "color": "#f7e926"
+      "color": "#f7e926",
+      "target": 200
     },
     {
       "id": "1764234203609",
@@ -339,7 +343,7 @@
     }
   ],
   "displayConfig": {
-    "mode": "combined",
+    "mode": "multi",
     "selectedMetrics": [
       "健身",
       "专注",
@@ -354,12 +358,9 @@
       "健身"
     ],
     "multiMetrics": [
-      "健身",
-      "专注",
       "睡觉",
-      "coding",
-      "12"
+      "coding"
     ],
-    "combinedColor": "#4464c5"
+    "combinedColor": "#ce0909"
   }
 }

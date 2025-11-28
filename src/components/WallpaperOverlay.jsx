@@ -1,5 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { AreaChart, Area, ResponsiveContainer, YAxis, XAxis, Label } from 'recharts';
+import { AreaChart, Area, ResponsiveContainer, YAxis, XAxis, Label, ReferenceLine } from 'recharts';
+
+const COLORS = [
+  '#60A5FA', '#F87171', '#34D399', '#FBBF24', 
+  '#A78BFA', '#F472B6', '#2DD4BF', '#FB923C',
+];
 
 const FALLBACK_COLORS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
 
@@ -7,7 +12,10 @@ const WallpaperOverlay = () => {
   const [allData, setAllData] = useState([]);
   const [viewMode, setViewMode] = useState('raw');
   const [weights, setWeights] = useState({});
-  const [displayConfig, setDisplayConfig] = useState({ mode: 'single', combinedMetrics: [], multiMetrics: [], combinedColor: '#60A5FA' });
+  const [displayConfig, setDisplayConfig] = useState({ 
+    mode: 'single', combinedMetrics: [], multiMetrics: [], combinedColor: '#60A5FA',
+    combinedGoal: 0, showCombinedGoal: true, showSingleGoal: true 
+  });
   const [metrics, setMetrics] = useState([]);
 
   useEffect(() => {
@@ -25,8 +33,8 @@ const WallpaperOverlay = () => {
     window.api.onMetricsUpdate(setMetrics);
   }, []);
 
-  const { chartData, displayInfo, areas } = useMemo(() => {
-    if (allData.length === 0) return { chartData: [], displayInfo: null, areas: [] };
+  const { chartData, displayInfo, areas, targetScore, maxY, activeGoalColor } = useMemo(() => {
+    if (allData.length === 0) return { chartData: [], displayInfo: null, areas: [], targetScore: null, maxY: 0, activeGoalColor: '#FFF' };
 
     const getMetricColor = (label, index) => {
       const m = metrics.find(item => item.label === label);
@@ -34,11 +42,10 @@ const WallpaperOverlay = () => {
     };
 
     const getScore = (val, type) => {
-      const w = weights[type] || 1;
+      const w = weights[type] !== undefined ? weights[type] : 1;
       return Number((val * w).toFixed(1));
     };
 
-    // ✅ 获取用户自定义的 Combined 颜色，默认为蓝色
     const combinedColor = displayConfig.combinedColor || '#60A5FA';
 
     let processedData = [];
@@ -46,15 +53,32 @@ const WallpaperOverlay = () => {
     let subTitle = "";
     let mainNumber = 0;
     let chartAreas = [];
+    let calculatedTargetScore = null;
+    let currentMaxData = 0;
+    
+    // ✅ 新增：用于存储目标线的颜色
+    let goalColor = '#FFFFFF'; 
 
-    // Mode A: Single
+    // =========================================================
+    // 模式 A: Auto Single
+    // =========================================================
     if (displayConfig.mode === 'single') {
       const lastEntry = allData[allData.length - 1];
       const targetType = lastEntry.type;
       title = `${targetType} · ${viewMode.toUpperCase()}`;
       
       const singleColor = getMetricColor(targetType, 0);
+      // ✅ 设定目标线颜色为当前指标颜色
+      goalColor = singleColor;
+
       chartAreas.push({ key: 'score', color: singleColor, fill: true, gradientId: 'gradFill', strokeWidth: 3 });
+
+      if (displayConfig.showSingleGoal !== false) {
+        const metricDef = metrics.find(m => m.label === targetType);
+        if (metricDef && metricDef.target > 0) {
+          calculatedTargetScore = getScore(Number(metricDef.target), targetType);
+        }
+      }
 
       if (viewMode === 'raw') {
         const typeData = allData.filter(i => i.type === targetType).slice(-20);
@@ -85,8 +109,13 @@ const WallpaperOverlay = () => {
         mainNumber = getScore(totalRaw, targetType);
         subTitle = `Total: ${Math.round(totalRaw)} ${lastEntry.unit}`;
       }
+
+      const maxDataVal = Math.max(...processedData.map(d => d.score), 0);
+      currentMaxData = maxDataVal;
     } 
-    // Mode B/C/D
+    // =========================================================
+    // 模式 B/C/D
+    // =========================================================
     else {
       const isMulti = displayConfig.mode === 'multi';
       const isOverlay = displayConfig.mode === 'overlay';
@@ -96,25 +125,24 @@ const WallpaperOverlay = () => {
       
       const combinedSelected = displayConfig.combinedMetrics || [];
       const multiSelected = displayConfig.multiMetrics || [];
-      
       let activeMetrics = [];
       if (isOverlay) activeMetrics = [...new Set([...combinedSelected, ...multiSelected])];
       else if (isMulti) activeMetrics = multiSelected;
       else activeMetrics = combinedSelected;
 
-      // Areas Logic
+      // ✅ 设定 Combined 模式下的目标线颜色为综合色
+      if (isOverlay || isCombined) {
+        goalColor = combinedColor;
+        if (displayConfig.showCombinedGoal !== false) {
+          if (displayConfig.combinedGoal > 0) {
+            calculatedTargetScore = displayConfig.combinedGoal;
+          }
+        }
+      }
+
       if (isOverlay || isCombined) {
           if (combinedSelected.length > 0) {
-            // ✅ 使用自定义 Combined 颜色
-            // Overlay: 无边框，自定义背景填充
-            // Combined: 有边框，自定义线条填充
-            chartAreas.push({ 
-                key: 'totalScore', 
-                color: combinedColor, 
-                fill: true, 
-                gradientId: isOverlay ? 'totalFill' : 'combinedLineFill', // 区分两种渐变
-                strokeWidth: isOverlay ? 0 : 3 
-            });
+            chartAreas.push({ key: 'totalScore', color: combinedColor, fill: true, gradientId: isOverlay ? 'totalFill' : 'combinedLineFill', strokeWidth: isOverlay ? 0 : 3 });
           }
       }
       if (isOverlay || isMulti) {
@@ -123,7 +151,6 @@ const WallpaperOverlay = () => {
           });
       }
 
-      // Data Processing (Standard)
       const bucketMap = {};
       const isHour = viewMode === 'hour';
       const isRaw = viewMode === 'raw';
@@ -149,7 +176,6 @@ const WallpaperOverlay = () => {
       else {
           if (isHour) new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
           else for(let i=6; i>=0; i--) { const d = new Date(); d.setDate(d.getDate()-i); bucketMap[d.toISOString().split('T')[0]] = {}; }
-          
           allData.filter(i => activeMetrics.includes(i.type)).forEach(i => {
                const key = isHour ? new Date(i.timestamp).getHours() : i.date;
                const isToday = new Date(i.timestamp).toDateString() === new Date().toDateString();
@@ -175,14 +201,28 @@ const WallpaperOverlay = () => {
           mainNumber = Math.round(totalSum);
           subTitle = `Total: ${viewMode === 'hour' ? 'Today' : '7 Days'}`;
       }
+      
+      const maxVal = Math.max(
+          ...processedData.map(d => d.totalScore || 0),
+          ...processedData.map(d => {
+              const vals = Object.values(d).filter(v => typeof v === 'number');
+              return Math.max(...vals, 0);
+          })
+      );
+      currentMaxData = maxVal;
     }
+
+    const finalMaxY = Math.max(currentMaxData, calculatedTargetScore || 0) * 1.15;
 
     return { 
       chartData: processedData, 
       displayInfo: { title, subTitle, mainNumber }, 
       areas: chartAreas, 
       metricDefs: metrics,
-      combinedColor: displayConfig.combinedColor || '#60A5FA' // 传递颜色
+      combinedColor: displayConfig.combinedColor,
+      targetScore: calculatedTargetScore,
+      maxY: finalMaxY,
+      activeGoalColor: goalColor // ✅ 导出颜色
     };
   }, [allData, viewMode, weights, displayConfig, metrics]);
 
@@ -202,32 +242,25 @@ const WallpaperOverlay = () => {
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={chartData}>
             <defs>
-              {/* 通用 Single 渐变 */}
               <linearGradient id="gradFill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#fff" stopOpacity={0.15}/>
                 <stop offset="95%" stopColor="#fff" stopOpacity={0}/>
               </linearGradient>
-              
-              {/* ✅ 动态 Combined 渐变 (Overlay 背景) */}
               <linearGradient id="totalFill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor={areas.combinedColor || '#3B82F6'} stopOpacity={0.3}/> 
                 <stop offset="95%" stopColor={areas.combinedColor || '#3B82F6'} stopOpacity={0.05}/>
               </linearGradient>
-
-              {/* ✅ 动态 Combined 渐变 (Combined 线条) */}
               <linearGradient id="combinedLineFill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor={areas.combinedColor || '#60A5FA'} stopOpacity={0.2}/> 
                 <stop offset="95%" stopColor={areas.combinedColor || '#60A5FA'} stopOpacity={0}/>
               </linearGradient>
-
               <filter id="glow">
                 <feGaussianBlur stdDeviation="2" result="coloredBlur" />
                 <feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge>
               </filter>
             </defs>
-            
             <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} dy={10} />
-            <YAxis domain={['auto', 'auto']} orientation="right" tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} tickFormatter={(val) => Math.round(val)} width={40}>
+            <YAxis domain={[0, maxY || 100]} orientation="right" tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} tickFormatter={(val) => Math.round(val)} width={40}>
               <Label value="PTS" offset={10} position="insideTopRight" style={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 'bold' }} />
             </YAxis>
             
@@ -244,10 +277,31 @@ const WallpaperOverlay = () => {
                   animationDuration={1000}
                 />
             ))}
+
+            {/* ✅ 目标线：颜色现在是动态的 */}
+            {targetScore > 0 && (
+              <ReferenceLine 
+                y={targetScore} 
+                stroke={activeGoalColor} // 使用计算出来的颜色
+                strokeOpacity={0.8}
+                strokeDasharray="4 4" 
+                strokeWidth={1.5}
+                label={{ 
+                  value: 'GOAL', 
+                  position: 'insideBottomRight', 
+                  fill: activeGoalColor, // 文字也同色
+                  fontSize: 10,
+                  fontWeight: 'bold',
+                  dy: -10
+                }} 
+              />
+            )}
+
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
+      {/* 看板 */}
       <div className="absolute top-16 right-16 text-slate-200 text-right select-none transition-all">
         <p className="text-xs font-bold tracking-[0.3em] opacity-40 uppercase mb-[-5px] text-blue-200">
           {displayInfo.title}

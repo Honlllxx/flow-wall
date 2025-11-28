@@ -193,7 +193,11 @@ ipcMain.handle('get-display-config', () => {
     mode: 'single', 
     combinedMetrics: [], 
     multiMetrics: [],
-    combinedColor: '#60A5FA' 
+    combinedColor: '#60A5FA' ,
+    combinedGoal: 0 ,// ✅ 新增：综合总目标分数
+    // ✅ 新增：控制目标线的显示/隐藏 (默认显示)
+    showCombinedGoal: true, 
+    showSingleGoal: true    
   });
 });
 
