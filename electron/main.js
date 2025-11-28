@@ -1,5 +1,5 @@
-
-const { app, BrowserWindow, screen, ipcMain, globalShortcut, Tray, Menu } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, globalShortcut, Tray, Menu, dialog } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const isDev = require('electron-is-dev');
 const Store = require('electron-store');
@@ -9,12 +9,12 @@ let wallpaperWin = null;
 let controlWin = null;
 let tray = null;
 
-
-
-
 // 【新增】关闭硬件加速（解决 Windows 下透明窗口变白/黑的问题）
 app.disableHardwareAcceleration();
 
+// ==========================================
+// 1. 窗口管理
+// ==========================================
 
 // 创建“隐形”壁纸层
 function createWallpaperWindow() {
@@ -25,13 +25,13 @@ function createWallpaperWindow() {
     height,
     x: 0, 
     y: 0,
-    type: 'desktop', // macOS 关键
-    frame: false,    // 无边框
-    transparent: true, // 透明背景
+    type: 'desktop', 
+    frame: false,    
+    transparent: true, 
     hasShadow: false,
     enableLargerThanScreen: true,
     resizable: false,
-    focusable: false, // 永远不抢焦点
+    focusable: false, 
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -39,10 +39,7 @@ function createWallpaperWindow() {
     }
   });
 
-  // 核心：让鼠标点击完全穿透，直达桌面图标
   wallpaperWin.setIgnoreMouseEvents(true, { forward: true });
-  
-  // Windows下需要设为忽略任务栏
   wallpaperWin.setSkipTaskbar(true);
 
   const startURL = isDev 
@@ -56,12 +53,12 @@ function createWallpaperWindow() {
 function createControlPanel() {
   controlWin = new BrowserWindow({
     width: 400,
-    height: 520,
-        frame: false,
+    height: 550, // 修正高度：550 以容纳底部备份按钮
+    frame: false,
     transparent: true,
-    show: false, // 默认隐藏
+    show: false, 
     resizable: false,
-    alwaysOnTop: true, // 确保浮在最上层
+    alwaysOnTop: true, 
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -75,7 +72,6 @@ function createControlPanel() {
 
   controlWin.loadURL(startURL);
 
-  // 失去焦点自动隐藏，体验更流畅
   controlWin.on('blur', () => controlWin.hide());
 }
 
@@ -83,19 +79,17 @@ app.whenReady().then(() => {
   createWallpaperWindow();
   createControlPanel();
 
-  // 注册全局快捷键 Alt+D
   globalShortcut.register('Alt+D', () => {
     if (controlWin.isVisible()) {
       controlWin.hide();
     } else {
       controlWin.center();
       controlWin.show();
-      controlWin.focus(); // 确保输入框获得焦点
+      controlWin.focus();
     }
   });
 
-  // 系统托盘（防止后台运行时无法退出）
-  tray = new Tray(path.join(__dirname, '../public/icon.png')); // 需自备icon
+  tray = new Tray(path.join(__dirname, '../public/icon.png'));
   const contextMenu = Menu.buildFromTemplate([
     { label: '显示控制板', click: () => controlWin.show() },
     { label: '退出 FlowWall', click: () => app.quit() }
@@ -104,103 +98,114 @@ app.whenReady().then(() => {
   tray.setContextMenu(contextMenu);
 });
 
-// --- IPC 通信逻辑 ---
-
-// 【新增】获取显示配置
-ipcMain.handle('get-display-config', () => {
-  return store.get('display-config', { 
-    mode: 'single', 
-    // ❌ 以前只有一个 selectedMetrics
-    // ✅ 现在拆分为两个独立的列表
-    combinedMetrics: [], 
-    multiMetrics: [] 
-  });
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
-// 【新增】保存显示配置
-ipcMain.on('save-display-config', (event, config) => {
-  store.set('display-config', config);
-  // 通知壁纸层刷新
-  if (wallpaperWin) wallpaperWin.webContents.send('display-config-updated', config);
-});
 
-// 1. 获取初始数据
+// ==========================================
+// 2. 核心业务逻辑 (IPC)
+// ==========================================
+
+// --- A. 基础数据 (增删查) ---
+
 ipcMain.handle('get-data', () => {
   return store.get('stats', []);
 });
 
-// 【新增】获取指标列表
-ipcMain.handle('get-metrics', () => {
-  // 默认指标（如果第一次运行）
-  const defaultMetrics = [
-    { id: 'reading', label: '阅读', unit: '页', iconKey: 'book' },
-    { id: 'fitness', label: '健身', unit: '分钟', iconKey: 'activity' },
-    { id: 'focus',   label: '专注', unit: '小时', iconKey: 'zap' },
-    { id: 'water',   label: '饮水', unit: 'ml',   iconKey: 'coffee' },
-  ];
-  return store.get('user-metrics', defaultMetrics);
-});
-
-// 【新增】保存指标列表
-ipcMain.on('save-metrics', (event, metrics) => {
-  store.set('user-metrics', metrics);
-  // 广播通知前端刷新（如果有多个窗口）
-  if (controlWin) controlWin.webContents.send('metrics-updated', metrics);
-});
-
-// 【新增】获取权重配置
-ipcMain.handle('get-weights', () => {
-  // 默认权重：阅读10分/页，健身5分/分，专注20分/小时，饮水0.1分/ml
-  const defaultWeights = { '阅读': 10, '健身': 5, '专注': 20, '饮水': 0.1 };
-  return store.get('weights', defaultWeights);
-});
-
-// 【新增】保存权重配置
-ipcMain.on('save-weights', (event, weights) => {
-  store.set('weights', weights);
-  // 通知壁纸层刷新，重新计算曲线
-  if (wallpaperWin) wallpaperWin.webContents.send('weights-updated', weights);
-});
-
-// 2. 保存新记录
+// 添加记录
 ipcMain.on('add-entry', (event, newEntry) => {
   const currentData = store.get('stats', []) || [];
+  
+  // ✅ 修正时区问题：使用本地时间构建日期字符串
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const localDate = `${year}-${month}-${day}`;
+
   const entry = {
     ...newEntry,
     id: Date.now(),
-    date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
+    date: localDate, // YYYY-MM-DD (本地时间)
     timestamp: Date.now()
   };
   
   const updatedData = [...currentData, entry];
-  // 仅保留最近30条数据，避免文件过大
-  if (updatedData.length > 30) updatedData.shift();
+  // ✅ 修正容量：保留 1000 条，30条太少了
+  if (updatedData.length > 1000) updatedData.shift();
   
   store.set('stats', updatedData);
   
-  // 广播给壁纸层更新图表
-  wallpaperWin.webContents.send('data-updated', updatedData);
+  // ✅ 修正通信：同时通知两个窗口
+  if (wallpaperWin) wallpaperWin.webContents.send('data-updated', updatedData);
+  if (controlWin) controlWin.webContents.send('data-updated', updatedData);
 });
 
-
-// 【新增】删除指定 ID 的记录
+// 删除记录
 ipcMain.on('delete-entry', (event, id) => {
   const currentData = store.get('stats', []) || [];
-  
-  // 过滤掉这就条 ID 的数据
   const newData = currentData.filter(item => item.id !== id);
   
-  // 保存并广播更新
   store.set('stats', newData);
   
-  // 通知壁纸层刷新图表
+  // 同时通知两个窗口
   if (wallpaperWin) wallpaperWin.webContents.send('data-updated', newData);
-  // 通知控制面板刷新列表（如果面板开着的话）
   if (controlWin) controlWin.webContents.send('data-updated', newData);
-
 });
 
-  // 【新增】动态控制鼠标穿透状态
+
+// --- B. 配置管理 (指标、权重、显示模式) ---
+
+// 获取/保存 指标定义 (Metrics)
+ipcMain.handle('get-metrics', () => {
+  const defaultMetrics = [
+    { id: 'reading', label: '阅读', unit: '页', iconKey: 'book', color: '#60A5FA' },
+    { id: 'fitness', label: '健身', unit: '分钟', iconKey: 'activity', color: '#F87171' },
+    { id: 'focus',   label: '专注', unit: '小时', iconKey: 'zap', color: '#FBBF24' },
+    { id: 'water',   label: '饮水', unit: 'ml',   iconKey: 'coffee', color: '#34D399' },
+  ];
+  return store.get('user-metrics', defaultMetrics);
+});
+
+ipcMain.on('save-metrics', (event, metrics) => {
+  store.set('user-metrics', metrics);
+  // ✅ 修正通信：必须通知壁纸层（为了颜色），也要通知控制板（为了列表）
+  if (wallpaperWin) wallpaperWin.webContents.send('metrics-updated', metrics);
+  if (controlWin) controlWin.webContents.send('metrics-updated', metrics);
+});
+
+// 获取/保存 权重 (Weights)
+ipcMain.handle('get-weights', () => {
+  return store.get('weights', { '阅读': 10, '健身': 5, '专注': 20, '饮水': 0.1 });
+});
+
+ipcMain.on('save-weights', (event, weights) => {
+  store.set('weights', weights);
+  if (wallpaperWin) wallpaperWin.webContents.send('weights-updated', weights);
+  if (controlWin) controlWin.webContents.send('weights-updated', weights);
+});
+
+// 获取/保存 显示配置 (Display Config)
+// ✅ 修正冲突：合并了之前的重复定义，包含了 combinedColor 和两个列表
+ipcMain.handle('get-display-config', () => {
+  return store.get('display-config', { 
+    mode: 'single', 
+    combinedMetrics: [], 
+    multiMetrics: [],
+    combinedColor: '#60A5FA' 
+  });
+});
+
+ipcMain.on('save-display-config', (event, config) => {
+  store.set('display-config', config);
+  if (wallpaperWin) wallpaperWin.webContents.send('display-config-updated', config);
+  if (controlWin) controlWin.webContents.send('display-config-updated', config);
+});
+
+
+// --- C. 窗口交互 ---
+
 ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win) {
@@ -209,9 +214,73 @@ ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
 });
 
 
+// ==========================================
+// 3. 数据备份与恢复 (Import/Export)
+// ==========================================
 
+ipcMain.handle('export-data', async () => {
+  const backupData = {
+    timestamp: Date.now(),
+    version: '1.0',
+    stats: store.get('stats', []),
+    weights: store.get('weights', {}),
+    metrics: store.get('user-metrics', []),
+    displayConfig: store.get('display-config', {})
+  };
 
+  const { filePath } = await dialog.showSaveDialog({
+    title: 'Export FlowWall Data',
+    defaultPath: 'flow-wall-backup.json',
+    filters: [{ name: 'JSON Files', extensions: ['json'] }]
+  });
 
-app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
+  if (filePath) {
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(backupData, null, 2));
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+  return { success: false, cancelled: true };
+});
+
+ipcMain.handle('import-data', async () => {
+  const { filePaths } = await dialog.showOpenDialog({
+    title: 'Import FlowWall Backup',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON Files', extensions: ['json'] }]
+  });
+
+  if (filePaths && filePaths.length > 0) {
+    try {
+      const content = fs.readFileSync(filePaths[0], 'utf-8');
+      const data = JSON.parse(content);
+
+      if (!data.stats || !data.weights) {
+        throw new Error('Invalid backup file format');
+      }
+
+      store.set('stats', data.stats);
+      store.set('weights', data.weights);
+      if (data.metrics) store.set('user-metrics', data.metrics);
+      if (data.displayConfig) store.set('display-config', data.displayConfig);
+
+      // 通知所有窗口立即刷新数据
+      const wins = [wallpaperWin, controlWin];
+      wins.forEach(w => {
+        if (w && !w.isDestroyed()) {
+          w.webContents.send('data-updated', data.stats);
+          w.webContents.send('weights-updated', data.weights);
+          if (data.metrics) w.webContents.send('metrics-updated', data.metrics);
+          if (data.displayConfig) w.webContents.send('display-config-updated', data.displayConfig);
+        }
+      });
+
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+  return { success: false, cancelled: true };
 });

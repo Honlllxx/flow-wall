@@ -1,19 +1,13 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { AreaChart, Area, ResponsiveContainer, YAxis, XAxis, Label } from 'recharts';
 
-// 颜色池
-const COLORS = [
-  '#60A5FA', '#F87171', '#34D399', '#FBBF24', 
-  '#A78BFA', '#F472B6', '#2DD4BF', '#FB923C',
-];
-
 const FALLBACK_COLORS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
 
 const WallpaperOverlay = () => {
   const [allData, setAllData] = useState([]);
   const [viewMode, setViewMode] = useState('raw');
   const [weights, setWeights] = useState({});
-  const [displayConfig, setDisplayConfig] = useState({ mode: 'single', combinedMetrics: [], multiMetrics: [] });
+  const [displayConfig, setDisplayConfig] = useState({ mode: 'single', combinedMetrics: [], multiMetrics: [], combinedColor: '#60A5FA' });
   const [metrics, setMetrics] = useState([]);
 
   useEffect(() => {
@@ -44,22 +38,22 @@ const WallpaperOverlay = () => {
       return Number((val * w).toFixed(1));
     };
 
+    // ✅ 获取用户自定义的 Combined 颜色，默认为蓝色
+    const combinedColor = displayConfig.combinedColor || '#60A5FA';
+
     let processedData = [];
     let title = "";
     let subTitle = "";
     let mainNumber = 0;
     let chartAreas = [];
 
-    // =========================================================
-    // 模式 A: Auto Single
-    // =========================================================
+    // Mode A: Single
     if (displayConfig.mode === 'single') {
       const lastEntry = allData[allData.length - 1];
       const targetType = lastEntry.type;
       title = `${targetType} · ${viewMode.toUpperCase()}`;
       
       const singleColor = getMetricColor(targetType, 0);
-      // Single模式：gradientId 为 null，默认使用 gradFill
       chartAreas.push({ key: 'score', color: singleColor, fill: true, gradientId: 'gradFill', strokeWidth: 3 });
 
       if (viewMode === 'raw') {
@@ -92,9 +86,7 @@ const WallpaperOverlay = () => {
         subTitle = `Total: ${Math.round(totalRaw)} ${lastEntry.unit}`;
       }
     } 
-    // =========================================================
-    // 模式 B/C/D: Combined / Multi / Overlay
-    // =========================================================
+    // Mode B/C/D
     else {
       const isMulti = displayConfig.mode === 'multi';
       const isOverlay = displayConfig.mode === 'overlay';
@@ -110,31 +102,28 @@ const WallpaperOverlay = () => {
       else if (isMulti) activeMetrics = multiSelected;
       else activeMetrics = combinedSelected;
 
-      // --- 生成图表配置 (Areas) ---
-      
-      // 1. Overlay 模式下的 Total (背景)
-      if (isOverlay) {
+      // Areas Logic
+      if (isOverlay || isCombined) {
           if (combinedSelected.length > 0) {
-            // 关键：无边框 (strokeWidth: 0)，背景填充 (totalFill)
-            chartAreas.push({ key: 'totalScore', color: '#3B82F6', fill: true, gradientId: 'totalFill', strokeWidth: 0 });
+            // ✅ 使用自定义 Combined 颜色
+            // Overlay: 无边框，自定义背景填充
+            // Combined: 有边框，自定义线条填充
+            chartAreas.push({ 
+                key: 'totalScore', 
+                color: combinedColor, 
+                fill: true, 
+                gradientId: isOverlay ? 'totalFill' : 'combinedLineFill', // 区分两种渐变
+                strokeWidth: isOverlay ? 0 : 3 
+            });
           }
       }
-      // 2. Combined 模式下的 Total (前景线)
-      else if (isCombined) {
-          if (combinedSelected.length > 0) {
-            // 关键：有边框 (strokeWidth: 3)，蓝色线条填充 (blueFill)
-            chartAreas.push({ key: 'totalScore', color: '#60A5FA', fill: true, gradientId: 'blueFill', strokeWidth: 3 });
-          }
-      }
-
-      // 3. Multi 模式的线条
       if (isOverlay || isMulti) {
           multiSelected.forEach((metric, idx) => {
               chartAreas.push({ key: metric, color: getMetricColor(metric, idx), fill: false, gradientId: null, strokeWidth: 3 });
           });
       }
 
-      // --- 数据处理 ---
+      // Data Processing (Standard)
       const bucketMap = {};
       const isHour = viewMode === 'hour';
       const isRaw = viewMode === 'raw';
@@ -143,16 +132,12 @@ const WallpaperOverlay = () => {
           const filtered = allData.filter(i => activeMetrics.includes(i.type)).slice(-30);
           processedData = filtered.map((item) => {
               const point = { label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
-              
               if (multiSelected.includes(item.type)) point[item.type] = getScore(item.value, item.type);
-              multiSelected.forEach(m => { if (m !== item.type) point[m] = 0; }); // Raw模式补0
-
+              multiSelected.forEach(m => { if (m !== item.type) point[m] = 0; });
               if (combinedSelected.includes(item.type)) point.totalScore = getScore(item.value, item.type);
               else if (isOverlay || isCombined) point.totalScore = 0;
-
               return point;
           });
-          
           const last = processedData[processedData.length-1];
           mainNumber = last ? (last.totalScore || 0) : 0;
           if (isMulti && !isOverlay) {
@@ -164,7 +149,7 @@ const WallpaperOverlay = () => {
       else {
           if (isHour) new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
           else for(let i=6; i>=0; i--) { const d = new Date(); d.setDate(d.getDate()-i); bucketMap[d.toISOString().split('T')[0]] = {}; }
-
+          
           allData.filter(i => activeMetrics.includes(i.type)).forEach(i => {
                const key = isHour ? new Date(i.timestamp).getHours() : i.date;
                const isToday = new Date(i.timestamp).toDateString() === new Date().toDateString();
@@ -174,7 +159,6 @@ const WallpaperOverlay = () => {
                    if (combinedSelected.includes(i.type)) bucketMap[key].totalScore = (bucketMap[key].totalScore || 0) + s;
                }
           });
-
           const currentHour = new Date().getHours();
           processedData = Object.entries(bucketMap).map(([k, vals]) => {
               if (isHour && parseInt(k) > currentHour) return null;
@@ -182,7 +166,6 @@ const WallpaperOverlay = () => {
               if (isCombined || isOverlay) if (vals.totalScore === undefined) vals.totalScore = 0;
               return { label: isHour ? `${k}:00` : k.slice(5), ...vals };
           }).filter(Boolean);
-
           let totalSum = 0;
           processedData.forEach(p => { totalSum += (p.totalScore || 0); });
           if (isMulti && !isOverlay) {
@@ -190,7 +173,7 @@ const WallpaperOverlay = () => {
               processedData.forEach(p => { multiSelected.forEach(m => totalSum += (p[m] || 0)); });
           }
           mainNumber = Math.round(totalSum);
-          subTitle = `Total Score (${viewMode === 'hour' ? 'Today' : '7 Days'})`;
+          subTitle = `Total: ${viewMode === 'hour' ? 'Today' : '7 Days'}`;
       }
     }
 
@@ -198,7 +181,8 @@ const WallpaperOverlay = () => {
       chartData: processedData, 
       displayInfo: { title, subTitle, mainNumber }, 
       areas: chartAreas, 
-      metricDefs: metrics
+      metricDefs: metrics,
+      combinedColor: displayConfig.combinedColor || '#60A5FA' // 传递颜色
     };
   }, [allData, viewMode, weights, displayConfig, metrics]);
 
@@ -218,22 +202,22 @@ const WallpaperOverlay = () => {
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={chartData}>
             <defs>
-              {/* 1. 通用/Single 渐变 (白色) */}
+              {/* 通用 Single 渐变 */}
               <linearGradient id="gradFill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#fff" stopOpacity={0.15}/>
                 <stop offset="95%" stopColor="#fff" stopOpacity={0}/>
               </linearGradient>
               
-              {/* 2. Overlay 背景渐变 (深蓝，无边框背景用) */}
+              {/* ✅ 动态 Combined 渐变 (Overlay 背景) */}
               <linearGradient id="totalFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3}/> 
-                <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.05}/>
+                <stop offset="5%" stopColor={areas.combinedColor || '#3B82F6'} stopOpacity={0.3}/> 
+                <stop offset="95%" stopColor={areas.combinedColor || '#3B82F6'} stopOpacity={0.05}/>
               </linearGradient>
 
-              {/* 3. Combined 线条渐变 (亮蓝，有边框线条用) */}
-              <linearGradient id="blueFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#60A5FA" stopOpacity={0.2}/> 
-                <stop offset="95%" stopColor="#60A5FA" stopOpacity={0}/>
+              {/* ✅ 动态 Combined 渐变 (Combined 线条) */}
+              <linearGradient id="combinedLineFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={areas.combinedColor || '#60A5FA'} stopOpacity={0.2}/> 
+                <stop offset="95%" stopColor={areas.combinedColor || '#60A5FA'} stopOpacity={0}/>
               </linearGradient>
 
               <filter id="glow">
@@ -274,7 +258,6 @@ const WallpaperOverlay = () => {
         </h1>
         <div className="text-sm opacity-50 mt-2 font-mono flex flex-col items-end">
           <span>{displayInfo.subTitle}</span>
-          {/* 图例 */}
           {(displayConfig.mode === 'multi' || displayConfig.mode === 'overlay') && (
               <div className="flex gap-2 mt-2">
                   {(displayConfig.multiMetrics || []).map((mName) => {

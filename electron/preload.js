@@ -27,5 +27,20 @@ contextBridge.exposeInMainWorld('api', {
   getDisplayConfig: () => ipcRenderer.invoke('get-display-config'),
   saveDisplayConfig: (config) => ipcRenderer.send('save-display-config', config),
   onDisplayConfigUpdate: (callback) => ipcRenderer.on('display-config-updated', (event, config) => callback(config)),
+
+  
+  //数据导入导出
+    getMetrics: () => ipcRenderer.invoke('get-metrics'),
+    saveMetrics: (metrics) => ipcRenderer.send('save-metrics', metrics),
+    onMetricsUpdate: (callback) => ipcRenderer.on('metrics-updated', (event, metrics) => callback(metrics)),
+    
+    getDisplayConfig: () => ipcRenderer.invoke('get-display-config'),
+    saveDisplayConfig: (config) => ipcRenderer.send('save-display-config', config),
+    onDisplayConfigUpdate: (callback) => ipcRenderer.on('display-config-updated', (event, config) => callback(config)),
+  
+    // ✅【新增】数据导入导出接口
+    exportData: () => ipcRenderer.invoke('export-data'),
+    importData: () => ipcRenderer.invoke('import-data'),
+    
   
 });
