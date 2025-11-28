@@ -33,7 +33,10 @@ const ControlPanel = () => {
   
   const [displayConfig, setDisplayConfig] = useState({ 
     mode: 'single', combinedMetrics: [], multiMetrics: [], combinedColor: '#60A5FA',
-    combinedGoal: 0, showCombinedGoal: true
+    combinedGoal: 0, showCombinedGoal: true,
+    // ✅ 默认值
+    showIndividualGoals: true,
+    individualGoalModes: ['single', 'multi', 'overlay']
   });
 
   const [newMetricName, setNewMetricName] = useState('');
@@ -144,7 +147,6 @@ const ControlPanel = () => {
   const handleMetricUpdate = (metricId, changes) => {
     const updatedMetrics = metrics.map(m => m.id === metricId ? { ...m, ...changes } : m);
     setMetrics(updatedMetrics);
-    // 如果是 toggle 操作，立即保存，优化体验
     if (changes.showGoal !== undefined) {
         window.api.saveMetrics(updatedMetrics);
     }
@@ -160,6 +162,20 @@ const ControlPanel = () => {
 
   const toggleGoalVisibility = (key) => {
     const newConfig = { ...displayConfig, [key]: !displayConfig[key] };
+    setDisplayConfig(newConfig);
+    window.api.saveDisplayConfig(newConfig);
+  };
+
+  // ✅【新增】切换某个模式是否显示虚线
+  const toggleGoalMode = (modeName) => {
+    const currentModes = displayConfig.individualGoalModes || [];
+    let newModes;
+    if (currentModes.includes(modeName)) {
+      newModes = currentModes.filter(m => m !== modeName);
+    } else {
+      newModes = [...currentModes, modeName];
+    }
+    const newConfig = { ...displayConfig, individualGoalModes: newModes };
     setDisplayConfig(newConfig);
     window.api.saveDisplayConfig(newConfig);
   };
@@ -262,7 +278,7 @@ const ControlPanel = () => {
           
           <div className="flex-1 space-y-6 overflow-y-auto px-2 custom-scrollbar pb-2">
             
-            {/* Total Goal */}
+            {/* 1. Total Goal */}
             <div className={`p-4 border rounded-xl transition-colors ${displayConfig.showCombinedGoal ? 'bg-gradient-to-br from-blue-900/30 to-purple-900/30 border-white/10' : 'bg-white/5 border-white/5 opacity-60'}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2 text-blue-200">
@@ -277,16 +293,47 @@ const ControlPanel = () => {
                 <input type="number" value={displayConfig.combinedGoal || ''} onChange={(e) => setDisplayConfig({...displayConfig, combinedGoal: Number(e.target.value)})} onBlur={() => window.api.saveDisplayConfig(displayConfig)} placeholder="0" className="w-full bg-transparent text-4xl font-thin text-white border-b border-white/20 focus:border-blue-500 outline-none pb-1"/>
                 <span className="text-xs text-white/40 mb-2 font-mono">PTS</span>
               </div>
-              <p className="text-[10px] text-white/30 mt-2">Visible in Combined & Overlay modes.</p>
+              <p className="text-[10px] text-white/30 mt-2">Target for Combined & Overlay modes.</p>
             </div>
 
-            {/* Individual Goals */}
+            {/* 2. Individual Goals (Enhanced) */}
             <div>
-              <div className="flex items-center justify-between mb-3 pl-1">
-                <h3 className="text-[10px] uppercase text-white/30 tracking-widest">Individual Metrics</h3>
+              <div className="flex flex-col gap-2 mb-3 pl-1">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] uppercase text-white/30 tracking-widest">Individual Metrics</h3>
+                    {/* ✅ 全局总开关 */}
+                    <button 
+                        onClick={() => toggleGoalVisibility('showIndividualGoals')} 
+                        className={`p-1.5 rounded flex gap-2 items-center text-[10px] transition-colors ${displayConfig.showIndividualGoals !== false ? 'bg-blue-600/20 text-blue-200' : 'bg-white/5 text-white/30'}`}
+                    >
+                        <span>Global {displayConfig.showIndividualGoals !== false ? 'On' : 'Off'}</span>
+                        {displayConfig.showIndividualGoals !== false ? <Eye size={12} /> : <EyeOff size={12} />}
+                    </button>
+                </div>
+
+                {/* ✅ 模式选择器 */}
+                <div className="flex gap-1.5 opacity-90">
+                    {['single', 'combined', 'multi', 'overlay'].map(m => {
+                        const isActive = (displayConfig.individualGoalModes || ['single', 'multi', 'overlay']).includes(m);
+                        const labelMap = { single: 'Auto', combined: 'Sum', multi: 'Multi', overlay: 'Over' };
+                        return (
+                            <button
+                                key={m}
+                                onClick={() => toggleGoalMode(m)}
+                                className={`px-2 py-1 rounded text-[9px] border transition-all ${
+                                    isActive 
+                                    ? 'bg-blue-500 text-white border-blue-500' 
+                                    : 'bg-transparent text-white/30 border-white/10 hover:border-white/30'
+                                }`}
+                            >
+                                {labelMap[m]}
+                            </button>
+                        )
+                    })}
+                </div>
               </div>
 
-              <div className="space-y-2">
+              <div className={`space-y-2 transition-opacity ${displayConfig.showIndividualGoals !== false ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
                 {metrics.map(m => (
                   <div key={m.id} className={`flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5 transition-opacity ${m.showGoal !== false ? 'opacity-100' : 'opacity-60'}`}>
                     <div className="flex items-center gap-3">
@@ -296,24 +343,11 @@ const ControlPanel = () => {
                         <span className="text-[10px] text-white/30">{m.unit}</span>
                       </div>
                     </div>
-                    
                     <div className="flex items-center gap-3">
-                      {/* 目标值输入 */}
                       <div className="flex items-center gap-1">
-                        <input 
-                          type="number" placeholder="-" 
-                          value={m.target ?? ''} 
-                          onChange={(e) => handleMetricUpdate(m.id, { target: e.target.value === '' ? 0 : Number(e.target.value) })}
-                          onBlur={() => window.api.saveMetrics(metrics)}
-                          className="w-14 bg-black/20 border border-white/10 rounded p-1.5 text-center text-sm font-mono focus:outline-none focus:border-blue-500 text-yellow-200/90"
-                        />
+                        <input type="number" placeholder="-" value={m.target ?? ''} onChange={(e) => handleMetricUpdate(m.id, { target: e.target.value === '' ? 0 : Number(e.target.value) })} onBlur={() => window.api.saveMetrics(metrics)} className="w-14 bg-black/20 border border-white/10 rounded p-1.5 text-center text-sm font-mono focus:outline-none focus:border-blue-500 text-yellow-200/90"/>
                       </div>
-                      
-                      {/* ✅ 独立显示开关 */}
-                      <button 
-                        onClick={() => handleMetricUpdate(m.id, { showGoal: m.showGoal === undefined ? false : !m.showGoal })} 
-                        className={`p-1.5 rounded transition-colors ${m.showGoal !== false ? 'bg-white/10 text-white' : 'text-white/20 hover:text-white'}`}
-                      >
+                      <button onClick={() => handleMetricUpdate(m.id, { showGoal: m.showGoal === undefined ? false : !m.showGoal })} className={`p-1.5 rounded transition-colors ${m.showGoal !== false ? 'bg-white/10 text-white' : 'text-white/20 hover:text-white'}`}>
                         {m.showGoal !== false ? <Eye size={14} /> : <EyeOff size={14} />}
                       </button>
                     </div>
@@ -326,7 +360,7 @@ const ControlPanel = () => {
         </div>
       )}
 
-      {/* --- Settings 视图 --- */}
+      {/* --- Settings 视图 (保持不变) --- */}
       {view === 'settings' && (
         <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
           <h2 className="text-center text-white/50 text-xs mb-4 tracking-widest uppercase">Display Mode</h2>

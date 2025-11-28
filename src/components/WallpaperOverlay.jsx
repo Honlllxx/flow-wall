@@ -14,7 +14,7 @@ const WallpaperOverlay = () => {
   const [weights, setWeights] = useState({});
   const [displayConfig, setDisplayConfig] = useState({ 
     mode: 'single', combinedMetrics: [], multiMetrics: [], combinedColor: '#60A5FA',
-    combinedGoal: 0, showCombinedGoal: true
+    combinedGoal: 0, showCombinedGoal: true, showIndividualGoals: true, individualGoalModes: ['single', 'multi', 'overlay']
   });
   const [metrics, setMetrics] = useState([]);
 
@@ -54,13 +54,63 @@ const WallpaperOverlay = () => {
     let mainNumber = 0;
     let chartAreas = [];
     let currentMaxData = 0;
-    
-    // ✅ 目标线数组
     let refLines = [];
 
-    // =========================================================
-    // 模式 A: Auto Single
-    // =========================================================
+    // ==========================================
+    // 1. 统一处理目标线 (Goal Lines)
+    // ==========================================
+    
+    // A. Total Goal Line
+    const showTotal = (displayConfig.mode === 'combined' || displayConfig.mode === 'overlay') && displayConfig.showCombinedGoal !== false && displayConfig.combinedGoal > 0;
+    if (showTotal) {
+      refLines.push({ value: displayConfig.combinedGoal, color: '#FFFFFF', label: 'TOTAL GOAL', opacity: 0.9, width: 2 });
+    }
+
+    // B. Individual Goal Lines
+    // 检查全局开关 和 模式过滤
+    const showIndivGlobal = displayConfig.showIndividualGoals !== false;
+    const allowedModes = displayConfig.individualGoalModes || ['single', 'multi', 'overlay'];
+    const isModeAllowed = allowedModes.includes(displayConfig.mode);
+
+    if (showIndivGlobal && isModeAllowed) {
+        // 确定哪些指标是“当前可见”的
+        let visibleMetrics = [];
+        if (displayConfig.mode === 'single') {
+            const lastEntry = allData[allData.length - 1];
+            if (lastEntry) visibleMetrics = [lastEntry.type];
+        } else if (displayConfig.mode === 'multi') {
+            visibleMetrics = displayConfig.multiMetrics || [];
+        } else if (displayConfig.mode === 'overlay') {
+            // 在 Overlay 模式下，通常只显示 Multi 列表里的独立线，或者全部
+            visibleMetrics = [...new Set([...(displayConfig.multiMetrics || []), ...(displayConfig.combinedMetrics || [])])];
+        } else if (displayConfig.mode === 'combined') {
+            // Combined 模式下通常只看总分，但用户如果在配置里开启了 'combined' 模式显示独立线，则显示
+            visibleMetrics = displayConfig.combinedMetrics || [];
+        }
+
+        // 遍历可见指标，添加目标线
+        visibleMetrics.forEach(mName => {
+            const mDef = metrics.find(m => m.label === mName);
+            if (mDef && mDef.target > 0 && mDef.showGoal !== false) {
+                const goalVal = getScore(Number(mDef.target), mName);
+                if (goalVal > 0) {
+                    refLines.push({ 
+                        value: goalVal, 
+                        color: mDef.color || '#FFF', 
+                        label: `${mName.toUpperCase()}`, 
+                        opacity: 0.6, 
+                        width: 1 
+                    });
+                }
+            }
+        });
+    }
+
+
+    // ==========================================
+    // 2. 模式处理逻辑
+    // ==========================================
+
     if (displayConfig.mode === 'single') {
       const lastEntry = allData[allData.length - 1];
       const targetType = lastEntry.type;
@@ -68,13 +118,6 @@ const WallpaperOverlay = () => {
       
       const singleColor = getMetricColor(targetType, 0);
       chartAreas.push({ key: 'score', color: singleColor, fill: true, gradientId: 'gradFill', strokeWidth: 3 });
-
-      // Single Mode 的目标线
-      const metricDef = metrics.find(m => m.label === targetType);
-      if (metricDef && metricDef.target > 0 && metricDef.showGoal !== false) {
-        const goalVal = getScore(Number(metricDef.target), targetType);
-        refLines.push({ value: goalVal, color: singleColor, label: 'GOAL' });
-      }
 
       if (viewMode === 'raw') {
         const typeData = allData.filter(i => i.type === targetType).slice(-20);
@@ -106,12 +149,8 @@ const WallpaperOverlay = () => {
         subTitle = `Total: ${Math.round(totalRaw)} ${lastEntry.unit}`;
       }
 
-      const maxDataVal = Math.max(...processedData.map(d => d.score), 0);
-      currentMaxData = maxDataVal;
+      currentMaxData = Math.max(...processedData.map(d => d.score), 0);
     } 
-    // =========================================================
-    // 模式 B/C/D
-    // =========================================================
     else {
       const isMulti = displayConfig.mode === 'multi';
       const isOverlay = displayConfig.mode === 'overlay';
@@ -126,26 +165,6 @@ const WallpaperOverlay = () => {
       else if (isMulti) activeMetrics = multiSelected;
       else activeMetrics = combinedSelected;
 
-      // 1. Total Goal Line (Combined/Overlay)
-      if ((isOverlay || isCombined) && displayConfig.showCombinedGoal !== false && displayConfig.combinedGoal > 0) {
-        refLines.push({ value: displayConfig.combinedGoal, color: '#FFFFFF', label: 'TOTAL GOAL', opacity: 0.8 });
-      }
-
-      // 2. Individual Goal Lines (Overlay/Multi)
-      if (isOverlay || isMulti) {
-        multiSelected.forEach(mName => {
-          const mDef = metrics.find(m => m.label === mName);
-          if (mDef && mDef.target > 0 && mDef.showGoal !== false) {
-             const goalVal = getScore(Number(mDef.target), mName);
-             // 只有当目标值在合理范围内（>0）才添加
-             if (goalVal > 0) {
-                refLines.push({ value: goalVal, color: mDef.color || '#FFF', label: `${mName.toUpperCase()}`, opacity: 0.6 });
-             }
-          }
-        });
-      }
-
-      // Areas
       if (isOverlay || isCombined) {
           if (combinedSelected.length > 0) {
             chartAreas.push({ key: 'totalScore', color: combinedColor, fill: true, gradientId: isOverlay ? 'totalFill' : 'combinedLineFill', strokeWidth: isOverlay ? 0 : 3 });
@@ -218,7 +237,7 @@ const WallpaperOverlay = () => {
       currentMaxData = maxVal;
     }
 
-    // ✅ 计算最大值：考虑所有可见的目标线
+    // ✅ 动态计算 Y 轴最大值：考虑所有参考线的高度
     const maxGoal = refLines.length > 0 ? Math.max(...refLines.map(l => l.value)) : 0;
     const finalMaxY = Math.max(currentMaxData, maxGoal) * 1.15;
 
@@ -228,7 +247,7 @@ const WallpaperOverlay = () => {
       areas: chartAreas, 
       metricDefs: metrics,
       combinedColor: displayConfig.combinedColor,
-      referenceLines: refLines, // 导出所有线
+      referenceLines: refLines,
       maxY: finalMaxY 
     };
   }, [allData, viewMode, weights, displayConfig, metrics]);
@@ -293,7 +312,7 @@ const WallpaperOverlay = () => {
                 stroke={line.color} 
                 strokeOpacity={line.opacity || 0.8}
                 strokeDasharray="4 4" 
-                strokeWidth={1.5}
+                strokeWidth={line.width || 1.5}
                 label={{ 
                   value: line.label, 
                   position: 'insideBottomRight', 

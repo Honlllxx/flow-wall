@@ -210,7 +210,11 @@ ipcMain.handle('get-display-config', () => {
     combinedGoal: 0 ,// ✅ 新增：综合总目标分数
     // ✅ 新增：控制目标线的显示/隐藏 (默认显示)
     showCombinedGoal: true, 
-    showSingleGoal: true    
+    showSingleGoal: true  ,
+    // ✅ 新增：Individual 目标线的全局控制
+    showIndividualGoals: true, // 总开关
+    individualGoalModes: ['single', 'multi', 'overlay'] // 默认在这些模式下显示，Combined模式默认不显示太乱
+      
   });
 });
 
