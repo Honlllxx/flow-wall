@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Activity, BookOpen, Coffee, Zap, Check, Trash2, List, RotateCcw, 
-  Settings, Save, Plus, Star, Hash, Smile, Heart, Code, Music, Layers, Eye, GitGraph
+  Settings, Save, Plus, Star, Hash, Smile, Heart, Code, Music, 
+  Layers, Eye, GitGraph, Link2, Link2Off 
 } from 'lucide-react';
 
 const ICON_MAP = {
@@ -18,8 +19,6 @@ const ICON_MAP = {
 };
 
 const AVAILABLE_ICONS = ['star', 'code', 'music', 'heart', 'hash', 'smile', 'book', 'activity', 'zap', 'coffee'];
-
-// 默认颜色池（用于新建指标时的随机默认色）
 const DEFAULT_COLORS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
 
 const ControlPanel = () => {
@@ -84,23 +83,15 @@ const ControlPanel = () => {
   const handleSaveWeights = () => {
     window.api.saveWeights(weights);
     window.api.saveDisplayConfig(displayConfig);
-    // 同时保存指标颜色的更改（metrics state 已经更新了，但要持久化）
     window.api.saveMetrics(metrics);
     setView('record');
   };
 
   const handleAddMetric = () => {
     if (!newMetricName || !newMetricUnit) return;
-    
-    // 随机分配一个默认颜色
     const randomColor = DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)];
-
     const newMetric = { 
-      id: Date.now().toString(), 
-      label: newMetricName, 
-      unit: newMetricUnit, 
-      iconKey: newMetricIcon,
-      color: randomColor // ✅ 新增颜色字段
+      id: Date.now().toString(), label: newMetricName, unit: newMetricUnit, iconKey: newMetricIcon, color: randomColor 
     };
     
     const updatedMetrics = [...metrics, newMetric];
@@ -122,8 +113,12 @@ const ControlPanel = () => {
   };
 
   const toggleMetricSelection = (label) => {
+    // 在 Overlay 模式下点击时，默认修改 Multi 列表，或者你可以禁止修改
+    if (displayConfig.mode === 'overlay') return;
+
     const isMultiMode = displayConfig.mode === 'multi';
     const targetKey = isMultiMode ? 'multiMetrics' : 'combinedMetrics';
+    
     const currentList = displayConfig[targetKey] || [];
     let newList;
     if (currentList.includes(label)) {
@@ -134,14 +129,20 @@ const ControlPanel = () => {
     setDisplayConfig({ ...displayConfig, [targetKey]: newList });
   };
 
-  // ✅【新增】更新颜色
   const handleColorChange = (metricId, newColor) => {
-    const updatedMetrics = metrics.map(m => 
-      m.id === metricId ? { ...m, color: newColor } : m
-    );
+    const updatedMetrics = metrics.map(m => m.id === metricId ? { ...m, color: newColor } : m);
     setMetrics(updatedMetrics);
-    // 注意：这里我们不立即调用 saveMetrics，而是等用户点左上角 SAVE 时统一保存
-    // 这样可以避免频繁写入文件
+  };
+
+  // ✅【新增】处理 Overlay 切换逻辑
+  const toggleOverlay = () => {
+    if (displayConfig.mode === 'overlay') {
+      // 如果当前是 Overlay，点击取消，默认回到 Multi 模式
+      setDisplayConfig({ ...displayConfig, mode: 'multi' });
+    } else {
+      // 如果当前是其他模式，点击激活 Overlay
+      setDisplayConfig({ ...displayConfig, mode: 'overlay' });
+    }
   };
 
   return (
@@ -231,32 +232,85 @@ const ControlPanel = () => {
         <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
           <h2 className="text-center text-white/50 text-xs mb-4 tracking-widest uppercase">Display Mode</h2>
           
-          <div className="mx-2 mb-4 p-1 bg-white/5 rounded-lg flex border border-white/10">
-            <button onClick={() => setDisplayConfig({ ...displayConfig, mode: 'single' })} className={`flex-1 flex flex-col items-center justify-center py-2 rounded transition-all ${displayConfig.mode === 'single' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}>
+          <div className="flex gap-2 mx-2 mb-4">
+            {/* Auto 单项模式 (独立) */}
+            <button 
+              onClick={() => setDisplayConfig({ ...displayConfig, mode: 'single' })}
+              className={`w-20 flex flex-col items-center justify-center py-2 rounded-lg transition-all border ${displayConfig.mode === 'single' ? 'bg-blue-600 text-white border-blue-500' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'}`}
+            >
               <Eye size={14} className="mb-1"/> <span className="text-[10px]">Auto</span>
             </button>
-            <button onClick={() => setDisplayConfig({ ...displayConfig, mode: 'combined' })} className={`flex-1 flex flex-col items-center justify-center py-2 rounded transition-all ${displayConfig.mode === 'combined' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}>
-              <Layers size={14} className="mb-1"/> <span className="text-[10px]">Combined</span>
-            </button>
-            <button onClick={() => setDisplayConfig({ ...displayConfig, mode: 'multi' })} className={`flex-1 flex flex-col items-center justify-center py-2 rounded transition-all ${displayConfig.mode === 'multi' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}>
-              <GitGraph size={14} className="mb-1"/> <span className="text-[10px]">Multi-View</span>
-            </button>
+
+            {/* 组合模式控制器容器 */}
+            <div className="flex-1 flex items-center bg-white/5 border border-white/10 rounded-lg p-1 relative">
+                
+                {/* Combined 按钮 */}
+                <button 
+                  onClick={() => setDisplayConfig({ ...displayConfig, mode: 'combined' })}
+                  className={`flex-1 flex flex-col items-center justify-center py-2 rounded-md transition-all ${
+                    displayConfig.mode === 'combined' || displayConfig.mode === 'overlay'
+                      ? 'bg-blue-600/80 text-white shadow-lg' 
+                      : 'text-white/40 hover:text-white'
+                  }`}
+                >
+                  <Layers size={14} className="mb-1"/> <span className="text-[10px]">Combined</span>
+                </button>
+
+                {/* ✅ Overlay 切换小按钮 (链接链) */}
+                <button
+                  onClick={toggleOverlay}
+                  className={`mx-1 p-1 rounded-full transition-all z-10 ${
+                    displayConfig.mode === 'overlay' 
+                      ? 'bg-white text-blue-600 shadow-[0_0_10px_rgba(255,255,255,0.5)] scale-110' 
+                      : 'bg-black/20 text-white/20 hover:text-white hover:bg-white/10'
+                  }`}
+                  title={displayConfig.mode === 'overlay' ? "Disconnect Overlay" : "Connect Overlay"}
+                >
+                  {displayConfig.mode === 'overlay' ? <Link2 size={12} strokeWidth={3} /> : <Link2Off size={12} />}
+                </button>
+
+                {/* Multi 按钮 */}
+                <button 
+                  onClick={() => setDisplayConfig({ ...displayConfig, mode: 'multi' })}
+                  className={`flex-1 flex flex-col items-center justify-center py-2 rounded-md transition-all ${
+                    displayConfig.mode === 'multi' || displayConfig.mode === 'overlay'
+                      ? 'bg-blue-600/80 text-white shadow-lg' 
+                      : 'text-white/40 hover:text-white'
+                  }`}
+                >
+                  <GitGraph size={14} className="mb-1"/> <span className="text-[10px]">Multi</span>
+                </button>
+
+                {/* Overlay 激活时的连线光效 (装饰) */}
+                {displayConfig.mode === 'overlay' && (
+                  <div className="absolute inset-x-2 top-1/2 h-0.5 bg-white/20 -z-0 blur-[1px]"></div>
+                )}
+            </div>
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto px-2 custom-scrollbar pb-2">
             
+            {/* 提示信息：引导用户去特定模式勾选 */}
+            {displayConfig.mode === 'overlay' && (
+              <div className="p-2 mb-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[10px] text-blue-200 text-center animate-fade-in">
+                Overlay Mode is active.<br/>
+                Switch to <b>Combined</b> or <b>Multi</b> tabs to modify selections.
+              </div>
+            )}
+
             {metrics.map(m => {
               const isMultiMode = displayConfig.mode === 'multi';
               const currentList = isMultiMode ? (displayConfig.multiMetrics || []) : (displayConfig.combinedMetrics || []);
               const isSelected = currentList.includes(m.label);
-              const isModeActive = displayConfig.mode !== 'single';
+              // 在 overlay 模式下，我们锁定勾选，防止混淆
+              const isModeEditable = displayConfig.mode === 'multi' || displayConfig.mode === 'combined';
               
               return (
-                <div key={m.id} className={`flex items-center justify-between p-2 rounded-lg border shrink-0 transition-colors ${isSelected && isModeActive ? 'bg-blue-500/10 border-blue-500/50' : 'bg-white/5 border-white/5'}`}>
+                <div key={m.id} className={`flex items-center justify-between p-2 rounded-lg border shrink-0 transition-colors ${isSelected && isModeEditable ? 'bg-blue-500/10 border-blue-500/50' : 'bg-white/5 border-white/5'} ${!isModeEditable ? 'opacity-50' : ''}`}>
                   
                   <div className="flex items-center gap-3 overflow-hidden flex-1">
                     {/* 复选框 */}
-                    {isModeActive && (
+                    {isModeEditable && (
                       <button 
                         onClick={() => toggleMetricSelection(m.label)}
                         className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-white/20 hover:border-white/50'}`}
@@ -265,7 +319,7 @@ const ControlPanel = () => {
                       </button>
                     )}
                     
-                    <div className="opacity-70 text-blue-400 shrink-0">
+                    <div className="opacity-70 text-blue-400 shrink-0" style={{ color: m.color || '#60A5FA' }}>
                         {ICON_MAP[m.iconKey] || <Hash size={18}/>}
                     </div>
                     
@@ -276,8 +330,6 @@ const ControlPanel = () => {
                   </div>
                   
                   <div className="flex items-center gap-2">
-                    
-                    {/* ✅【新增】颜色选择器 */}
                     <div className="relative group/color">
                       <div className="w-4 h-4 rounded-full border border-white/20 overflow-hidden cursor-pointer" style={{ backgroundColor: m.color || '#60A5FA' }}></div>
                       <input 
@@ -285,10 +337,8 @@ const ControlPanel = () => {
                         value={m.color || '#60A5FA'}
                         onChange={(e) => handleColorChange(m.id, e.target.value)}
                         className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                        title="Change Color"
                       />
                     </div>
-
                      <span className="text-[10px] text-white/30 ml-1">Wt:</span>
                      <input 
                       type="number" step="0.1"

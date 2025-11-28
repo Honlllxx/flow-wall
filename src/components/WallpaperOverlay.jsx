@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { AreaChart, Area, ResponsiveContainer, YAxis, XAxis, Label } from 'recharts';
 
-// 预设颜色池
+// 颜色池
 const COLORS = [
   '#60A5FA', '#F87171', '#34D399', '#FBBF24', 
   '#A78BFA', '#F472B6', '#2DD4BF', '#FB923C',
@@ -17,13 +17,17 @@ const WallpaperOverlay = () => {
   const [metrics, setMetrics] = useState([]);
 
   useEffect(() => {
-    window.api.getData().then(setAllData);
+    const fetchData = async () => {
+      setAllData(await window.api.getData());
+      setWeights(await window.api.getWeights());
+      setDisplayConfig(await window.api.getDisplayConfig());
+      setMetrics(await window.api.getMetrics());
+    };
+    fetchData();
+
     window.api.onDataUpdate(setAllData);
-    window.api.getWeights().then(setWeights);
     window.api.onWeightsUpdate(setWeights);
-    window.api.getDisplayConfig().then(setDisplayConfig);
     window.api.onDisplayConfigUpdate(setDisplayConfig);
-    window.api.getMetrics().then(setMetrics);
     window.api.onMetricsUpdate(setMetrics);
   }, []);
 
@@ -55,7 +59,8 @@ const WallpaperOverlay = () => {
       title = `${targetType} · ${viewMode.toUpperCase()}`;
       
       const singleColor = getMetricColor(targetType, 0);
-      chartAreas.push({ key: 'score', color: singleColor, fill: true });
+      // Single模式：gradientId 为 null，默认使用 gradFill
+      chartAreas.push({ key: 'score', color: singleColor, fill: true, gradientId: 'gradFill', strokeWidth: 3 });
 
       if (viewMode === 'raw') {
         const typeData = allData.filter(i => i.type === targetType).slice(-20);
@@ -66,142 +71,134 @@ const WallpaperOverlay = () => {
         mainNumber = getScore(lastEntry.value, targetType);
         subTitle = `Raw: ${lastEntry.value} ${lastEntry.unit}`;
       } 
-      else if (viewMode === 'hour' || viewMode === 'day') {
+      else { 
         const bucketMap = {};
         const isHour = viewMode === 'hour';
-        if (isHour) {
-            new Array(24).fill(0).forEach((_, i) => bucketMap[i] = 0);
-        } else {
-            for(let i=6; i>=0; i--) { 
-                const d = new Date(); d.setDate(d.getDate()-i); 
-                bucketMap[d.toISOString().split('T')[0]] = 0; 
-            }
-        }
+        if (isHour) new Array(24).fill(0).forEach((_, i) => bucketMap[i] = 0);
+        else for(let i=6; i>=0; i--) { const d = new Date(); d.setDate(d.getDate()-i); bucketMap[d.toISOString().split('T')[0]] = 0; }
+        
         allData.filter(i => i.type === targetType).forEach(i => {
              const key = isHour ? new Date(i.timestamp).getHours() : i.date;
              const isToday = new Date(i.timestamp).toDateString() === new Date().toDateString();
-             if (bucketMap[key] !== undefined && (viewMode === 'day' || isToday)) {
-                 bucketMap[key] += i.value;
-             }
+             if (bucketMap[key] !== undefined && (viewMode === 'day' || isToday)) bucketMap[key] += i.value;
         });
         const currentHour = new Date().getHours();
         processedData = Object.entries(bucketMap).map(([k, v]) => {
             if (isHour && parseInt(k) > currentHour) return null;
-            return {
-                score: getScore(v, targetType),
-                label: isHour ? `${k}:00` : k.slice(5)
-            };
+            return { score: getScore(v, targetType), label: isHour ? `${k}:00` : k.slice(5) };
         }).filter(Boolean);
         const totalRaw = processedData.reduce((acc, c) => acc + (c.score / (weights[targetType] || 1)), 0);
         mainNumber = getScore(totalRaw, targetType);
-        subTitle = `Total Raw: ${Math.round(totalRaw)} ${lastEntry.unit}`;
+        subTitle = `Total: ${Math.round(totalRaw)} ${lastEntry.unit}`;
       }
     } 
     // =========================================================
-    // 模式 B & C: Combined / Multi
+    // 模式 B/C/D: Combined / Multi / Overlay
     // =========================================================
     else {
       const isMulti = displayConfig.mode === 'multi';
-      title = isMulti ? "MULTI METRICS VIEW" : "COMBINED ENERGY";
-      const selected = isMulti 
-        ? (displayConfig.multiMetrics || []) 
-        : (displayConfig.combinedMetrics || []);
+      const isOverlay = displayConfig.mode === 'overlay';
+      const isCombined = displayConfig.mode === 'combined';
+
+      title = isOverlay ? "COMBINED + MULTI" : (isMulti ? "MULTI VIEW" : "COMBINED SUM");
       
-      if (isMulti) {
-          selected.forEach((metric, idx) => {
-              chartAreas.push({ key: metric, color: getMetricColor(metric, idx), fill: false });
-          });
-      } else {
-          chartAreas.push({ key: 'totalScore', color: '#60A5FA', fill: true });
+      const combinedSelected = displayConfig.combinedMetrics || [];
+      const multiSelected = displayConfig.multiMetrics || [];
+      
+      let activeMetrics = [];
+      if (isOverlay) activeMetrics = [...new Set([...combinedSelected, ...multiSelected])];
+      else if (isMulti) activeMetrics = multiSelected;
+      else activeMetrics = combinedSelected;
+
+      // --- 生成图表配置 (Areas) ---
+      
+      // 1. Overlay 模式下的 Total (背景)
+      if (isOverlay) {
+          if (combinedSelected.length > 0) {
+            // 关键：无边框 (strokeWidth: 0)，背景填充 (totalFill)
+            chartAreas.push({ key: 'totalScore', color: '#3B82F6', fill: true, gradientId: 'totalFill', strokeWidth: 0 });
+          }
+      }
+      // 2. Combined 模式下的 Total (前景线)
+      else if (isCombined) {
+          if (combinedSelected.length > 0) {
+            // 关键：有边框 (strokeWidth: 3)，蓝色线条填充 (blueFill)
+            chartAreas.push({ key: 'totalScore', color: '#60A5FA', fill: true, gradientId: 'blueFill', strokeWidth: 3 });
+          }
       }
 
+      // 3. Multi 模式的线条
+      if (isOverlay || isMulti) {
+          multiSelected.forEach((metric, idx) => {
+              chartAreas.push({ key: metric, color: getMetricColor(metric, idx), fill: false, gradientId: null, strokeWidth: 3 });
+          });
+      }
+
+      // --- 数据处理 ---
       const bucketMap = {};
       const isHour = viewMode === 'hour';
       const isRaw = viewMode === 'raw';
       
       if (isRaw) {
-          // ✅【Raw 模式核心修改】：补 0 逻辑
-          const filtered = allData.filter(i => selected.includes(i.type)).slice(-30);
+          const filtered = allData.filter(i => activeMetrics.includes(i.type)).slice(-30);
           processedData = filtered.map((item) => {
               const point = { label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
               
-              if (isMulti) {
-                  // 遍历所有选中的指标
-                  selected.forEach(metric => {
-                      if (metric === item.type) {
-                          // 如果是当前记录的指标，计算分数
-                          point[metric] = getScore(item.value, item.type);
-                      } else {
-                          // 如果不是，强制设为 0（这就是你想要的补0逻辑）
-                          point[metric] = 0;
-                      }
-                  });
-              } else {
-                  point.totalScore = getScore(item.value, item.type);
-              }
+              if (multiSelected.includes(item.type)) point[item.type] = getScore(item.value, item.type);
+              multiSelected.forEach(m => { if (m !== item.type) point[m] = 0; }); // Raw模式补0
+
+              if (combinedSelected.includes(item.type)) point.totalScore = getScore(item.value, item.type);
+              else if (isOverlay || isCombined) point.totalScore = 0;
+
               return point;
           });
-          const last = filtered[filtered.length-1];
-          mainNumber = last ? getScore(last.value, last.type) : 0;
-          subTitle = "Recent Activities";
+          
+          const last = processedData[processedData.length-1];
+          mainNumber = last ? (last.totalScore || 0) : 0;
+          if (isMulti && !isOverlay) {
+             const lastEntry = filtered[filtered.length-1];
+             mainNumber = lastEntry ? getScore(lastEntry.value, lastEntry.type) : 0;
+          }
+          subTitle = "Recent Flow";
       } 
       else {
-          // ✅【Hour / Day 模式】：保持补 0 逻辑
-          if (isHour) {
-              new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
-          } else {
-              for(let i=6; i>=0; i--) { 
-                  const d = new Date(); d.setDate(d.getDate()-i); 
-                  bucketMap[d.toISOString().split('T')[0]] = {}; 
-              }
-          }
+          if (isHour) new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
+          else for(let i=6; i>=0; i--) { const d = new Date(); d.setDate(d.getDate()-i); bucketMap[d.toISOString().split('T')[0]] = {}; }
 
-          allData.filter(i => selected.includes(i.type)).forEach(i => {
+          allData.filter(i => activeMetrics.includes(i.type)).forEach(i => {
                const key = isHour ? new Date(i.timestamp).getHours() : i.date;
                const isToday = new Date(i.timestamp).toDateString() === new Date().toDateString();
                if (bucketMap[key] && (viewMode === 'day' || isToday)) {
                    const s = getScore(i.value, i.type);
-                   if (isMulti) {
-                       bucketMap[key][i.type] = (bucketMap[key][i.type] || 0) + s;
-                   } else {
-                       bucketMap[key].totalScore = (bucketMap[key].totalScore || 0) + s;
-                   }
+                   if (multiSelected.includes(i.type)) bucketMap[key][i.type] = (bucketMap[key][i.type] || 0) + s;
+                   if (combinedSelected.includes(i.type)) bucketMap[key].totalScore = (bucketMap[key].totalScore || 0) + s;
                }
           });
 
           const currentHour = new Date().getHours();
           processedData = Object.entries(bucketMap).map(([k, vals]) => {
               if (isHour && parseInt(k) > currentHour) return null;
-              
-              // 强制补0：确保每个时间点的每个指标都有值（0 或 实际值）
-              if (isMulti) {
-                  selected.forEach(metric => { 
-                      if (vals[metric] === undefined) vals[metric] = 0; 
-                  });
-              } else {
-                  if (vals.totalScore === undefined) vals.totalScore = 0;
-              }
-
+              if (isMulti || isOverlay) multiSelected.forEach(metric => { if (vals[metric] === undefined) vals[metric] = 0; });
+              if (isCombined || isOverlay) if (vals.totalScore === undefined) vals.totalScore = 0;
               return { label: isHour ? `${k}:00` : k.slice(5), ...vals };
           }).filter(Boolean);
 
           let totalSum = 0;
-          processedData.forEach(p => {
-              if (isMulti) {
-                  selected.forEach(m => totalSum += (p[m] || 0));
-              } else {
-                  totalSum += (p.totalScore || 0);
-              }
-          });
+          processedData.forEach(p => { totalSum += (p.totalScore || 0); });
+          if (isMulti && !isOverlay) {
+              totalSum = 0;
+              processedData.forEach(p => { multiSelected.forEach(m => totalSum += (p[m] || 0)); });
+          }
           mainNumber = Math.round(totalSum);
-          subTitle = `Total Weighted Score (${viewMode === 'hour' ? 'Today' : '7 Days'})`;
+          subTitle = `Total Score (${viewMode === 'hour' ? 'Today' : '7 Days'})`;
       }
     }
 
     return { 
       chartData: processedData, 
       displayInfo: { title, subTitle, mainNumber }, 
-      areas: chartAreas 
+      areas: chartAreas, 
+      metricDefs: metrics
     };
   }, [allData, viewMode, weights, displayConfig, metrics]);
 
@@ -209,21 +206,9 @@ const WallpaperOverlay = () => {
 
   return (
     <div className="w-screen h-screen overflow-hidden relative pointer-events-none">
-      
-      <div 
-        className="absolute bottom-[42vh] right-16 flex gap-2 z-10 pointer-events-auto"
-        onMouseEnter={() => window.api.setIgnoreMouseEvents(false)}
-        onMouseLeave={() => window.api.setIgnoreMouseEvents(true, { forward: true })}
-      >
+      <div className="absolute bottom-[42vh] right-16 flex gap-2 z-10 pointer-events-auto" onMouseEnter={() => window.api.setIgnoreMouseEvents(false)} onMouseLeave={() => window.api.setIgnoreMouseEvents(true, { forward: true })}>
         {['raw', 'hour', 'day'].map(mode => (
-          <button
-            key={mode}
-            onClick={() => setViewMode(mode)}
-            className={`
-              px-3 py-1 text-xs uppercase tracking-widest rounded-full border transition-all cursor-pointer
-              ${viewMode === mode ? 'bg-white text-black border-white font-bold' : 'bg-black/20 text-white/40 border-white/10 hover:bg-white/10 hover:text-white'}
-            `}
-          >
+          <button key={mode} onClick={() => setViewMode(mode)} className={`px-3 py-1 text-xs uppercase tracking-widest rounded-full border transition-all cursor-pointer ${viewMode === mode ? 'bg-white text-black border-white font-bold' : 'bg-black/20 text-white/40 border-white/10 hover:bg-white/10 hover:text-white'}`}>
             {mode === 'raw' ? 'Latest' : mode}
           </button>
         ))}
@@ -233,15 +218,30 @@ const WallpaperOverlay = () => {
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={chartData}>
             <defs>
+              {/* 1. 通用/Single 渐变 (白色) */}
               <linearGradient id="gradFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#fff" stopOpacity={0.1}/>
+                <stop offset="5%" stopColor="#fff" stopOpacity={0.15}/>
                 <stop offset="95%" stopColor="#fff" stopOpacity={0}/>
               </linearGradient>
+              
+              {/* 2. Overlay 背景渐变 (深蓝，无边框背景用) */}
+              <linearGradient id="totalFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3}/> 
+                <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.05}/>
+              </linearGradient>
+
+              {/* 3. Combined 线条渐变 (亮蓝，有边框线条用) */}
+              <linearGradient id="blueFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#60A5FA" stopOpacity={0.2}/> 
+                <stop offset="95%" stopColor="#60A5FA" stopOpacity={0}/>
+              </linearGradient>
+
               <filter id="glow">
-                <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+                <feGaussianBlur stdDeviation="2" result="coloredBlur" />
                 <feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge>
               </filter>
             </defs>
+            
             <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} dy={10} />
             <YAxis domain={['auto', 'auto']} orientation="right" tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} tickFormatter={(val) => Math.round(val)} width={40}>
               <Label value="PTS" offset={10} position="insideTopRight" style={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 'bold' }} />
@@ -250,15 +250,13 @@ const WallpaperOverlay = () => {
             {areas.map((area) => (
                 <Area 
                   key={area.key}
-                  // 即便补了0，connectNulls 也是好的安全措施
                   connectNulls={true}
                   type="monotone" 
                   dataKey={area.key} 
-                  stroke={area.color} 
-                  strokeWidth={3}
-                  // Multi不填充
-                  fill={area.fill ? "url(#gradFill)" : "none"} 
-                  filter="url(#glow)" 
+                  stroke={area.strokeWidth === 0 ? "transparent" : area.color}
+                  strokeWidth={area.strokeWidth}
+                  fill={area.fill ? `url(#${area.gradientId})` : "none"} 
+                  filter={area.fill ? "" : "url(#glow)"} 
                   animationDuration={1000}
                 />
             ))}
@@ -270,24 +268,19 @@ const WallpaperOverlay = () => {
         <p className="text-xs font-bold tracking-[0.3em] opacity-40 uppercase mb-[-5px] text-blue-200">
           {displayInfo.title}
         </p>
-
         <h1 className="text-7xl font-thin tracking-tighter drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
           {displayInfo.mainNumber}
           <span className="text-xl ml-3 font-normal opacity-80 text-yellow-400/80">PTS</span>
         </h1>
-        
         <div className="text-sm opacity-50 mt-2 font-mono flex flex-col items-end">
           <span>{displayInfo.subTitle}</span>
-          {displayConfig.mode === 'multi' && (
+          {/* 图例 */}
+          {(displayConfig.mode === 'multi' || displayConfig.mode === 'overlay') && (
               <div className="flex gap-2 mt-2">
                   {(displayConfig.multiMetrics || []).map((mName) => {
-                      const mDef = metrics.find(i => i.label === mName);
+                      const mDef = metrics ? metrics.find(i => i.label === mName) : null;
                       const color = mDef?.color || FALLBACK_COLORS[0];
-                      return (
-                          <span key={mName} style={{color: color}} className="text-[10px] font-bold">
-                              ● {mName}
-                          </span>
-                      );
+                      return <span key={mName} style={{color: color}} className="text-[10px] font-bold">● {mName}</span>;
                   })}
               </div>
           )}
