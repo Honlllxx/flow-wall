@@ -8,15 +8,29 @@ const COLORS = [
 
 const FALLBACK_COLORS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
 
-// ✅【修改 1】名称修改：'7 Days' -> 'Days'
 const STANDARD_RANGES = [
   { id: 'raw', label: 'Latest' },
   { id: 'hour', label: 'Today' },
-  { id: 'day', label: 'Days' }, // 原 7 Days
+  { id: 'day', label: 'Days' },
   { id: 'week', label: 'Week' },
   { id: 'month', label: 'Month' },
   { id: 'year', label: 'Year' },
 ];
+
+// ✅ 辅助工具：获取本地日期字符串 YYYY-MM-DD
+const getLocalDayKey = (d) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// ✅ 辅助工具：获取本地月份字符串 YYYY-MM
+const getLocalMonthKey = (d) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+};
 
 const WallpaperOverlay = () => {
   const [allData, setAllData] = useState([]);
@@ -59,29 +73,26 @@ const WallpaperOverlay = () => {
 
     const combinedColor = displayConfig.combinedColor || '#60A5FA';
 
-    // --- 1. 时间窗口计算 (Fix for Week/Month/Year) ---
+    // --- 1. 时间窗口计算 (Time Window) ---
     const getStartDate = (mode) => {
       const now = new Date();
-      now.setHours(0, 0, 0, 0); 
+      now.setHours(0, 0, 0, 0); // Reset time to start of day
       
       if (mode === 'hour') return now; 
       
       const d = new Date(now);
       if (mode === 'day') {
-          d.setDate(d.getDate() - 6); // Last 7 days
+          d.setDate(d.getDate() - 6); // Past 7 days (including today)
       }
       else if (mode === 'week') {
-          // This Week (Start Monday)
-          const day = d.getDay() || 7; 
-          d.setHours(-24 * (day - 1)); 
+          const day = d.getDay() || 7; // Get current day (1-7), Monday is 1
+          d.setDate(d.getDate() - day + 1); // Set to Monday of this week
       }
       else if (mode === 'month') {
-          // This Month (1st)
-          d.setDate(1); 
+          d.setDate(1); // 1st of this month
       }
       else if (mode === 'year') {
-          // This Year (Jan 1st)
-          d.setMonth(0, 1); 
+          d.setMonth(0, 1); // Jan 1st of this year
       }
       else if (mode.startsWith('custom_')) {
           const custom = (displayConfig.customRanges || []).find(r => r.id === mode);
@@ -128,7 +139,7 @@ const WallpaperOverlay = () => {
         }
     }
 
-    // --- 4. 数据聚合处理 (Data Engine) ---
+    // --- 4. 数据聚合引擎 (Data Aggregation) ---
     let processedData = [];
     let mainNumber = 0;
     
@@ -142,27 +153,18 @@ const WallpaperOverlay = () => {
              rawSourceData = allData.filter(i => activeMetrics.includes(i.type));
         }
         
-        // 取最近 30 条
-        const filtered = rawSourceData.slice(-30);
+        const filtered = rawSourceData.slice(-30); // 只看最近30条
         
         processedData = filtered.map(item => {
             const point = { 
                 label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
             };
             
-            // Single Mode
             if (displayConfig.mode === 'single') {
                 point.score = getScore(item.value, item.type);
-            } 
-            // Multi/Combined Mode
-            else {
+            } else {
                 if (multiSelected.includes(item.type)) point[item.type] = getScore(item.value, item.type);
-                
-                // ✅ Raw模式下：如果想“流畅显示”，这里不应该强制补0
-                // 让 connectNulls 负责连接。
-                // 除非你希望看到“掉到底部”，这里可以把未发生的事件设为 0。
-                // 根据“逻辑0流畅显示”的要求，这里我们保留补0，以便看到起伏。
-                multiSelected.forEach(m => { if (m !== item.type) point[m] = 0; }); 
+                multiSelected.forEach(m => { if (m !== item.type) point[m] = 0; }); // 补0以显示起伏
 
                 if (combinedSelected.includes(item.type)) point.totalScore = getScore(item.value, item.type);
                 else if (displayConfig.mode === 'overlay' || displayConfig.mode === 'combined') point.totalScore = 0;
@@ -170,13 +172,11 @@ const WallpaperOverlay = () => {
             return point;
         });
 
-        // 计算看板主数字 (Latest Value)
         const last = processedData[processedData.length-1];
         if (displayConfig.mode === 'single') mainNumber = last ? last.score : 0;
         else if (displayConfig.mode === 'combined') mainNumber = last ? (last.totalScore || 0) : 0;
-        else mainNumber = last ? (last.totalScore || 0) : 0; // multi default fallback
+        else mainNumber = last ? (last.totalScore || 0) : 0;
         
-        // Special case for Multi-only mode main number
         if (displayConfig.mode === 'multi') {
              const lastEntry = filtered[filtered.length-1];
              mainNumber = lastEntry ? getScore(lastEntry.value, lastEntry.type) : 0;
@@ -187,52 +187,56 @@ const WallpaperOverlay = () => {
         const bucketMap = {};
         const now = new Date();
         
-        // ✅ [修复] 初始化时间桶 (确保有X轴刻度)
+        // --- 初始化时间桶 (X轴刻度) ---
         if (isHourly) {
             new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
         } 
         else if (isYear) {
-            // Year view: group by Month (YYYY-MM)
+            // Year 模式：按月 (YYYY-MM)
             for(let i=0; i<12; i++) {
                 const d = new Date(startDate);
                 d.setMonth(i);
-                // 只显示到当前月份，或者显示全年
-                // 这里显示全年 12 个月
-                const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                // 仅生成到当前月份的桶，或者生成全年（这里生成全年）
+                const key = getLocalMonthKey(d);
                 bucketMap[key] = {};
             }
         } 
         else {
-            // Daily granularity (Day, Week, Month, Custom)
-            // 循环每一天，直到今天
+            // Day/Week/Month/Custom 模式：按天 (YYYY-MM-DD)
+            // 关键修复：使用本地时间循环，确保 key 与数据中的 date 格式一致
             let loopDate = new Date(startDate);
-            // 安全限制：防止死循环 (最多366天)
-            let safeGuard = 0;
-            while (loopDate <= now && safeGuard < 366) {
-                const key = loopDate.toISOString().split('T')[0];
+            let safety = 0;
+            // 循环直到 loopDate 超过今天
+            // 注意：比较时要忽略时分秒，或者简单对比 getLocalDayKey
+            const todayKey = getLocalDayKey(now);
+            
+            while (safety < 366) {
+                const key = getLocalDayKey(loopDate);
                 bucketMap[key] = {};
+                
+                if (key === todayKey) break; // 到了今天就停止
                 loopDate.setDate(loopDate.getDate() + 1);
-                safeGuard++;
+                safety++;
             }
         }
 
-        // ✅ [修复] 填充数据
+        // --- 填充数据 ---
         allData.filter(i => activeMetrics.includes(i.type) && new Date(i.timestamp) >= startDate).forEach(i => {
              const d = new Date(i.timestamp);
              let key;
              
              if (isHourly) {
-                 if (d.toDateString() === now.toDateString()) key = d.getHours(); // 只看今天的小时
-                 else return; // 不是今天的数据丢弃
+                 if (getLocalDayKey(d) === getLocalDayKey(now)) key = d.getHours();
+                 else return;
              }
              else if (isYear) {
-                 key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                 key = getLocalMonthKey(d); // 使用 Local 月份 Key
              }
              else {
-                 key = i.date; // YYYY-MM-DD
+                 key = i.date; // 使用 main.js 生成的本地 YYYY-MM-DD
              }
 
-             // 只有当这个 key 在我们初始化的范围内才处理
+             // 如果这个 key 在我们的桶里（在显示范围内），则累加
              if (bucketMap[key]) {
                  const s = getScore(i.value, i.type);
                  
@@ -245,12 +249,12 @@ const WallpaperOverlay = () => {
              }
         });
 
-        // ✅ [修复] 扁平化与补 0
+        // --- 扁平化数据并补 0 ---
         const currentHour = now.getHours();
         processedData = Object.entries(bucketMap).map(([k, vals]) => {
-            if (isHourly && parseInt(k) > currentHour) return null; // 未来的小时不显示
+            if (isHourly && parseInt(k) > currentHour) return null; // 未来时间不显示
             
-            // 补 0 逻辑：确保聚合模式下，没有数据的点是 0
+            // 补 0 逻辑：确保线条连贯且正确归零
             if (displayConfig.mode === 'single') {
                 if (vals.score === undefined) vals.score = 0;
             } else {
@@ -260,22 +264,21 @@ const WallpaperOverlay = () => {
                     if (vals.totalScore === undefined) vals.totalScore = 0;
             }
 
-            // 生成 Label
+            // 生成 X 轴标签
             let label = k;
             if (isHourly) label = `${k}:00`;
             else if (isYear) {
-                const [y, m] = k.split('-');
+                const monthIndex = parseInt(k.split('-')[1]) - 1;
                 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                label = monthNames[parseInt(m)-1];
+                label = monthNames[monthIndex] || k;
             } else {
-                // Day/Week/Month: Show MM-DD
-                label = k.slice(5); 
+                label = k.slice(5); // MM-DD
             }
 
             return { label, ...vals };
         }).filter(Boolean);
 
-        // 计算区间总和
+        // 计算 Main Number (总分)
         let totalSum = 0;
         processedData.forEach(p => { 
             if (displayConfig.mode === 'single') totalSum += p.score;
@@ -285,11 +288,11 @@ const WallpaperOverlay = () => {
         mainNumber = Math.round(totalSum);
     }
 
-    // --- Titles ---
+    // --- Titles & Subtitles ---
     let title = "";
     let subTitle = "";
     let rangeText = viewMode.toUpperCase().replace('CUSTOM_', '');
-    if(viewMode === 'day') rangeText = '7 DAYS';
+    if(viewMode === 'day') rangeText = '7 DAYS'; // 修正显示文本
     
     if (displayConfig.mode === 'single') {
         const targetType = activeMetrics[0] || 'NONE';
@@ -302,7 +305,6 @@ const WallpaperOverlay = () => {
 
     // --- Goal Lines Logic ---
     let refLines = [];
-    // 目标线只在 'raw' 或 'hour' (Daily view) 下显示才有意义
     if (isHourly || isRaw) {
         const showTotal = (displayConfig.mode === 'combined' || displayConfig.mode === 'overlay') && displayConfig.showCombinedGoal !== false && displayConfig.combinedGoal > 0;
         if (showTotal) {
@@ -411,8 +413,7 @@ const WallpaperOverlay = () => {
             {areas.map((area) => (
                 <Area 
                   key={area.key}
-                  // ✅【核心】确保所有模式下线条连贯，空值为0会自动连到0
-                  connectNulls={true}
+                  connectNulls={true} // ✅ 强制开启断点连接，配合补0逻辑实现流畅落地
                   type="monotone" 
                   dataKey={area.key} 
                   stroke={area.strokeWidth === 0 ? "transparent" : area.color}
@@ -446,7 +447,6 @@ const WallpaperOverlay = () => {
         </ResponsiveContainer>
       </div>
 
-      {/* 看板 (保持原样) */}
       <div className="absolute top-16 right-16 text-slate-200 text-right select-none transition-all">
         <p className="text-xs font-bold tracking-[0.3em] opacity-40 uppercase mb-[-5px] text-blue-200">
           {displayInfo.title}
