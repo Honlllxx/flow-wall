@@ -3,7 +3,7 @@ import {
   Activity, BookOpen, Coffee, Zap, Check, Trash2, List, RotateCcw, 
   Settings, Save, Plus, Star, Hash, Smile, Heart, Code, Music, 
   Layers, Eye, GitGraph, Link2, Link2Off, Palette, Download, Upload, Target, EyeOff,
-  Clock, Calendar, Grid
+  Clock, Calendar 
 } from 'lucide-react';
 
 const ICON_MAP = {
@@ -52,12 +52,10 @@ const ControlPanel = () => {
   const [newMetricIcon, setNewMetricIcon] = useState('star');
   const [isAdding, setIsAdding] = useState(false);
 
-  // 自定义范围表单
   const [newRangeLabel, setNewRangeLabel] = useState('');
   const [newRangeDays, setNewRangeDays] = useState('');
-  // groupingType: 'day', 'week', 'month', 'custom_num'
-  const [groupingType, setGroupingType] = useState('day'); 
-  const [groupingNum, setGroupingNum] = useState(''); 
+  const [newRangeGrouping, setNewRangeGrouping] = useState('day'); 
+  const [newRangeCustomGroup, setNewRangeCustomGroup] = useState(''); 
   const [isAddingRange, setIsAddingRange] = useState(false);
 
   const inputRef = useRef(null);
@@ -158,6 +156,8 @@ const ControlPanel = () => {
       newList = [...currentList, label];
     }
     setDisplayConfig({ ...displayConfig, [targetKey]: newList });
+    // 勾选也建议实时保存
+    window.api.saveDisplayConfig({ ...displayConfig, [targetKey]: newList });
   };
 
   const handleMetricUpdate = (metricId, changes) => {
@@ -166,12 +166,17 @@ const ControlPanel = () => {
     if (changes.showGoal !== undefined) window.api.saveMetrics(updatedMetrics);
   };
 
+  // ✅ 核心功能：快速切换模式并自动保存
+  const changeMode = (newMode) => {
+    const newConfig = { ...displayConfig, mode: newMode };
+    setDisplayConfig(newConfig);
+    window.api.saveDisplayConfig(newConfig); // 立即保存
+  };
+
+  // ✅ Overlay 切换逻辑
   const toggleOverlay = () => {
-    if (displayConfig.mode === 'overlay') {
-      setDisplayConfig({ ...displayConfig, mode: 'multi' });
-    } else {
-      setDisplayConfig({ ...displayConfig, mode: 'overlay' });
-    }
+    const targetMode = displayConfig.mode === 'overlay' ? 'multi' : 'overlay';
+    changeMode(targetMode);
   };
 
   const toggleGoalVisibility = (key) => {
@@ -204,14 +209,12 @@ const ControlPanel = () => {
     window.api.saveDisplayConfig(newConfig);
   };
 
-  // ✅ 核心功能：添加自定义周期 (支持自定义分组)
   const handleAddCustomRange = () => {
     if (!newRangeLabel || !newRangeDays) return;
     
-    // 确定 finalGrouping: 字符串 'day'/'week'/'month' 或 数字
-    let finalGrouping = groupingType;
-    if (groupingType === 'custom_num') {
-        const num = parseInt(groupingNum);
+    let finalGrouping = newRangeGrouping;
+    if (newRangeGrouping === 'custom_num') {
+        const num = parseInt(newRangeCustomGroup);
         if (!num || num < 1) return;
         finalGrouping = num;
     }
@@ -228,8 +231,7 @@ const ControlPanel = () => {
     setDisplayConfig(newConfig);
     window.api.saveDisplayConfig(newConfig);
     
-    // Reset
-    setNewRangeLabel(''); setNewRangeDays(''); setGroupingType('day'); setGroupingNum(''); setIsAddingRange(false);
+    setNewRangeLabel(''); setNewRangeDays(''); setGroupingType('day'); setNewRangeCustomGroup(''); setIsAddingRange(false);
   };
 
   const handleDeleteCustomRange = (id) => {
@@ -323,82 +325,34 @@ const ControlPanel = () => {
         </div>
       )}
 
-      {/* --- ✅ 视图: 时间周期管理 --- */}
       {view === 'ranges' && (
         <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
           <h2 className="text-center text-white/50 text-xs mb-6 tracking-widest uppercase">Time Ranges</h2>
           <div className="flex-1 space-y-6 overflow-y-auto px-2 custom-scrollbar pb-2">
-            
-            {/* Standard Ranges */}
+            {/* ... Ranges Content (Same as before) ... */}
+            {/* 为了节省篇幅，此处省略了 Ranges 视图内部渲染代码，请保持原样 */}
             <div>
               <h3 className="text-[10px] uppercase text-white/30 tracking-widest mb-3 pl-1">Standard Buttons</h3>
               <div className="space-y-2">
                 {STANDARD_RANGES.map(range => (
                   <div key={range.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
                     <span className="text-sm font-medium">{range.label}</span>
-                    <button onClick={() => toggleTimeButton(range.id)} className={`p-1.5 rounded transition-colors ${(displayConfig.visibleButtons || []).includes(range.id) ? 'bg-white/10 text-white' : 'text-white/20 hover:text-white'}`}>
-                      {(displayConfig.visibleButtons || []).includes(range.id) ? <Eye size={14} /> : <EyeOff size={14} />}
-                    </button>
+                    <button onClick={() => toggleTimeButton(range.id)} className={`p-1.5 rounded transition-colors ${(displayConfig.visibleButtons || []).includes(range.id) ? 'bg-white/10 text-white' : 'text-white/20 hover:text-white'}`}>{ (displayConfig.visibleButtons || []).includes(range.id) ? <Eye size={14} /> : <EyeOff size={14} />}</button>
                   </div>
                 ))}
               </div>
             </div>
-
-            {/* Custom Ranges */}
             <div>
               <h3 className="text-[10px] uppercase text-white/30 tracking-widest mb-3 pl-1">Custom Ranges</h3>
               <div className="space-y-2">
                 {(displayConfig.customRanges || []).map(range => {
                     let groupInfo = 'Daily';
-                    if (range.grouping === 'week') groupInfo = 'Weekly';
-                    else if (range.grouping === 'month') groupInfo = 'Monthly';
-                    else if (typeof range.grouping === 'number') groupInfo = `Every ${range.grouping} Days`;
-
+                    if (range.grouping === 'week') groupInfo = 'Weekly'; else if (range.grouping === 'month') groupInfo = 'Monthly'; else if (typeof range.grouping === 'number') groupInfo = `Every ${range.grouping} Days`;
                     return (
-                      <div key={range.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
-                        <div className="flex flex-col">
-                            <span className="text-sm font-medium">{range.label}</span>
-                            <div className="flex gap-2 text-[10px] text-white/30">
-                                <span>{range.days} Days</span>
-                                <span className="opacity-50">•</span>
-                                <span className="text-blue-300/70">{groupInfo}</span>
-                            </div>
-                        </div>
-                        <button onClick={() => handleDeleteCustomRange(range.id)} className="p-1.5 text-white/20 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
+                      <div key={range.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5"><div className="flex flex-col"><span className="text-sm font-medium">{range.label}</span><div className="flex gap-2 text-[10px] text-white/30"><span>{range.days} Days</span><span className="opacity-50">•</span><span className="text-blue-300/70">{groupInfo}</span></div></div><button onClick={() => handleDeleteCustomRange(range.id)} className="p-1.5 text-white/20 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors"><Trash2 size={14} /></button></div>
                     )
                 })}
-
-                {!isAddingRange ? (
-                   <button onClick={() => setIsAddingRange(true)} className="w-full py-2 border border-dashed border-white/20 rounded-lg text-white/40 text-xs hover:text-white hover:border-white/40 transition-colors flex items-center justify-center gap-2"><Plus size={14} /> Add Range</button>
-                ) : (
-                   <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg space-y-3 animate-fade-in">
-                      <div className="flex flex-col gap-2">
-                         <div className="flex gap-2">
-                             <input placeholder="Label (e.g. History)" value={newRangeLabel} onChange={e => setNewRangeLabel(e.target.value)} className="flex-1 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/>
-                             <input placeholder="Days" type="number" value={newRangeDays} onChange={e => setNewRangeDays(e.target.value)} className="w-16 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/>
-                         </div>
-                         <div className="flex items-center gap-2 mt-1">
-                             <span className="text-[10px] text-white/40">Group By:</span>
-                             <select value={groupingType} onChange={e => setGroupingType(e.target.value)} className="bg-black/40 border border-white/10 rounded p-1 text-xs text-white/70 outline-none flex-1">
-                                 <option value="day">Day (Daily)</option>
-                                 <option value="week">Week (Weekly)</option>
-                                 <option value="month">Month (Monthly)</option>
-                                 <option value="custom_num">Custom Days...</option>
-                             </select>
-                             {groupingType === 'custom_num' && (
-                                 <input placeholder="N" type="number" value={groupingNum} onChange={e => setGroupingNum(e.target.value)} className="w-10 bg-black/20 border border-white/10 rounded p-1 text-center text-xs focus:outline-none focus:border-blue-400"/>
-                             )}
-                         </div>
-                      </div>
-                      <div className="flex gap-2 pt-2">
-                        <button onClick={handleAddCustomRange} className="flex-1 py-1.5 bg-blue-600 rounded text-xs hover:bg-blue-500">Add</button>
-                        <button onClick={() => setIsAddingRange(false)} className="px-3 py-1.5 bg-white/5 rounded text-xs hover:bg-white/10">Cancel</button>
-                      </div>
-                   </div>
-                )}
+                {!isAddingRange ? (<button onClick={() => setIsAddingRange(true)} className="w-full py-2 border border-dashed border-white/20 rounded-lg text-white/40 text-xs hover:text-white hover:border-white/40 transition-colors flex items-center justify-center gap-2"><Plus size={14} /> Add Range</button>) : (<div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg space-y-3 animate-fade-in"><div className="flex flex-col gap-2"><div className="flex gap-2"><input placeholder="Label" value={newRangeLabel} onChange={e => setNewRangeLabel(e.target.value)} className="flex-1 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/><input placeholder="Days" type="number" value={newRangeDays} onChange={e => setNewRangeDays(e.target.value)} className="w-16 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/></div><div className="flex items-center gap-2 mt-1"><span className="text-[10px] text-white/40">Group By:</span><select value={newRangeGrouping} onChange={e => setNewRangeGrouping(e.target.value)} className="bg-black/40 border border-white/10 rounded p-1 text-xs text-white/70 outline-none flex-1"><option value="day">Day (Daily)</option><option value="week">Week (Weekly)</option><option value="month">Month (Monthly)</option><option value="custom_num">Custom Days...</option></select>{newRangeGrouping === 'custom_num' && (<input placeholder="N" type="number" value={newRangeCustomGroup} onChange={e => setNewRangeCustomGroup(e.target.value)} className="w-10 bg-black/20 border border-white/10 rounded p-1 text-center text-xs focus:outline-none focus:border-blue-400"/>)}</div></div><div className="flex gap-2 pt-2"><button onClick={handleAddCustomRange} className="flex-1 py-1.5 bg-blue-600 rounded text-xs hover:bg-blue-500">Add</button><button onClick={() => setIsAddingRange(false)} className="px-3 py-1.5 bg-white/5 rounded text-xs hover:bg-white/10">Cancel</button></div></div>)}
               </div>
             </div>
           </div>
@@ -408,8 +362,9 @@ const ControlPanel = () => {
       {/* --- Goals 视图 --- */}
       {view === 'goals' && (
         <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
-          {/* ... Goals Code (保持不变) ... */}
           <h2 className="text-center text-white/50 text-xs mb-6 tracking-widest uppercase">Target Settings</h2>
+          {/* ... Goals Code (保持不变) ... */}
+          {/* 这里复用之前的 Goals 视图代码，未变动 */}
           <div className="flex-1 space-y-6 overflow-y-auto px-2 custom-scrollbar pb-2">
             <div className={`p-4 border rounded-xl transition-colors ${displayConfig.showCombinedGoal ? 'bg-gradient-to-br from-blue-900/30 to-purple-900/30 border-white/10' : 'bg-white/5 border-white/5 opacity-60'}`}>
               <div className="flex items-center justify-between mb-2">
@@ -455,51 +410,102 @@ const ControlPanel = () => {
         </div>
       )}
 
-      {/* --- Settings 视图 (保持不变) --- */}
+      {/* --- Settings 视图 (✅ 核心修改) --- */}
       {view === 'settings' && (
         <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
           <h2 className="text-center text-white/50 text-xs mb-4 tracking-widest uppercase">Display Mode</h2>
           
           <div className="flex gap-2 mx-2 mb-4">
-            <button onClick={() => setDisplayConfig({ ...displayConfig, mode: 'single' })} className={`w-20 flex flex-col items-center justify-center py-2 rounded-lg transition-all border ${displayConfig.mode === 'single' ? 'bg-blue-600 text-white border-blue-500' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'}`}><Eye size={14} className="mb-1"/> <span className="text-[10px]">Auto</span></button>
+            {/* ✅ 改为调用 changeMode 实现快速切换 */}
+            <button onClick={() => changeMode('single')} className={`w-20 flex flex-col items-center justify-center py-2 rounded-lg transition-all border ${displayConfig.mode === 'single' ? 'bg-blue-600 text-white border-blue-500' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'}`}><Eye size={14} className="mb-1"/> <span className="text-[10px]">Auto</span></button>
             <div className="flex-1 flex items-center bg-white/5 border border-white/10 rounded-lg p-1 relative">
-                <button onClick={() => setDisplayConfig({ ...displayConfig, mode: 'combined' })} className={`flex-1 flex flex-col items-center justify-center py-2 rounded-md transition-all ${displayConfig.mode === 'combined' || displayConfig.mode === 'overlay' ? 'bg-blue-600/80 text-white shadow-lg' : 'text-white/40 hover:text-white'}`}><Layers size={14} className="mb-1"/> <span className="text-[10px]">Combined</span></button>
+                <button onClick={() => changeMode('combined')} className={`flex-1 flex flex-col items-center justify-center py-2 rounded-md transition-all ${displayConfig.mode === 'combined' || displayConfig.mode === 'overlay' ? 'bg-blue-600/80 text-white shadow-lg' : 'text-white/40 hover:text-white'}`}><Layers size={14} className="mb-1"/> <span className="text-[10px]">Combined</span></button>
                 <button onClick={toggleOverlay} className={`mx-1 p-1 rounded-full transition-all z-10 ${displayConfig.mode === 'overlay' ? 'bg-white text-blue-600 shadow-[0_0_10px_rgba(255,255,255,0.5)] scale-110' : 'bg-black/20 text-white/20 hover:text-white hover:bg-white/10'}`} title={displayConfig.mode === 'overlay' ? "Disconnect Overlay" : "Connect Overlay"}>{displayConfig.mode === 'overlay' ? <Link2 size={12} strokeWidth={3} /> : <Link2Off size={12} />}</button>
-                <button onClick={() => setDisplayConfig({ ...displayConfig, mode: 'multi' })} className={`flex-1 flex flex-col items-center justify-center py-2 rounded-md transition-all ${displayConfig.mode === 'multi' || displayConfig.mode === 'overlay' ? 'bg-blue-600/80 text-white shadow-lg' : 'text-white/40 hover:text-white'}`}><GitGraph size={14} className="mb-1"/> <span className="text-[10px]">Multi</span></button>
+                <button onClick={() => changeMode('multi')} className={`flex-1 flex flex-col items-center justify-center py-2 rounded-md transition-all ${displayConfig.mode === 'multi' || displayConfig.mode === 'overlay' ? 'bg-blue-600/80 text-white shadow-lg' : 'text-white/40 hover:text-white'}`}><GitGraph size={14} className="mb-1"/> <span className="text-[10px]">Multi</span></button>
                 {displayConfig.mode === 'overlay' && <div className="absolute inset-x-2 top-1/2 h-0.5 bg-white/20 -z-0 blur-[1px]"></div>}
             </div>
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto px-2 custom-scrollbar pb-2">
+            
             {(displayConfig.mode === 'combined' || displayConfig.mode === 'overlay') && (
               <div className="flex items-center justify-between p-2 mb-2 bg-white/5 rounded-lg border border-white/10">
                 <div className="flex items-center gap-2"><Palette size={16} className="text-white/60"/><span className="text-xs font-medium">Total Sum Color</span></div>
-                <div className="flex items-center gap-2"><div className="relative group/color"><div className="w-5 h-5 rounded border border-white/20 overflow-hidden cursor-pointer shadow-sm" style={{ backgroundColor: displayConfig.combinedColor || '#60A5FA' }}></div><input type="color" value={displayConfig.combinedColor || '#60A5FA'} onChange={(e) => setDisplayConfig({...displayConfig, combinedColor: e.target.value})} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"/></div></div>
+                <div className="flex items-center gap-2">
+                  <div className="relative group/color">
+                    <div className="w-5 h-5 rounded border border-white/20 overflow-hidden cursor-pointer shadow-sm" style={{ backgroundColor: displayConfig.combinedColor || '#60A5FA' }}></div>
+                    <input type="color" value={displayConfig.combinedColor || '#60A5FA'} onChange={(e) => setDisplayConfig({...displayConfig, combinedColor: e.target.value})} onBlur={() => window.api.saveDisplayConfig(displayConfig)} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"/>
+                  </div>
+                </div>
               </div>
             )}
-            {displayConfig.mode === 'overlay' && <div className="p-2 mb-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[10px] text-blue-200 text-center animate-fade-in">Overlay Mode Active. Switch to <b>Combined</b> or <b>Multi</b> tabs to change selection.</div>}
+
+            {displayConfig.mode === 'overlay' && (
+              <div className="p-2 mb-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[10px] text-blue-200 text-center animate-fade-in">Overlay Mode Active. Switch to <b>Combined</b> or <b>Multi</b> tabs to change selection.</div>
+            )}
+
             {metrics.map(m => {
               const isMultiMode = displayConfig.mode === 'multi';
               const currentList = isMultiMode ? (displayConfig.multiMetrics || []) : (displayConfig.combinedMetrics || []);
               const isSelected = currentList.includes(m.label);
               const isModeEditable = displayConfig.mode === 'multi' || displayConfig.mode === 'combined';
+              
               return (
                 <div key={m.id} className={`flex items-center justify-between p-2 rounded-lg border shrink-0 transition-colors ${isSelected && isModeEditable ? 'bg-blue-500/10 border-blue-500/50' : 'bg-white/5 border-white/5'} ${!isModeEditable ? 'opacity-50' : ''}`}>
                   <div className="flex items-center gap-3 overflow-hidden flex-1">
-                    {isModeEditable && (<button onClick={() => toggleMetricSelection(m.label)} className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-white/20 hover:border-white/50'}`}>{isSelected && <Check size={10} />}</button>)}
+                    {isModeEditable && (
+                      <button onClick={() => toggleMetricSelection(m.label)} className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-white/20 hover:border-white/50'}`}>
+                        {isSelected && <Check size={10} />}
+                      </button>
+                    )}
                     <div className="opacity-70 text-blue-400 shrink-0" style={{ color: m.color || '#60A5FA' }}>{ICON_MAP[m.iconKey] || <Hash size={18}/>}</div>
                     <div className="flex flex-col"><span className="text-sm font-medium truncate">{m.label}</span><span className="text-[10px] text-white/30">{m.unit}</span></div>
                   </div>
+                  
                   <div className="flex items-center gap-1.5">
-                    <div className="relative group/color"><div className="w-3.5 h-3.5 rounded-full border border-white/20 overflow-hidden cursor-pointer" style={{ backgroundColor: m.color || '#60A5FA' }}></div><input type="color" value={m.color || '#60A5FA'} onChange={(e) => handleMetricUpdate(m.id, { color: e.target.value })} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"/></div>
-                    <div className="flex flex-col items-center"><span className="text-[8px] text-white/30 uppercase leading-none">Wt</span><input type="number" step="0.1" value={weights[m.label] !== undefined ? weights[m.label] : 1} onChange={(e) => setWeights({ ...weights, [m.label]: parseFloat(e.target.value) })} onBlur={() => window.api.saveWeights(weights)} className="w-8 bg-black/20 border border-white/10 rounded p-0.5 text-center text-[10px] focus:outline-none focus:border-blue-500"/></div>
+                    {/* ✅ Combined 模式下不显示颜色选择器 */}
+                    {displayConfig.mode !== 'combined' && (
+                      <div className="relative group/color">
+                        <div className="w-3.5 h-3.5 rounded-full border border-white/20 overflow-hidden cursor-pointer" style={{ backgroundColor: m.color || '#60A5FA' }}></div>
+                        <input type="color" value={m.color || '#60A5FA'} onChange={(e) => handleMetricUpdate(m.id, { color: e.target.value })} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"/>
+                      </div>
+                    )}
+                    
+                    <div className="flex flex-col items-center">
+                        <span className="text-[8px] text-white/30 uppercase leading-none">Wt</span>
+                        <input type="number" step="0.1" value={weights[m.label] !== undefined ? weights[m.label] : 1} onChange={(e) => setWeights({ ...weights, [m.label]: parseFloat(e.target.value) })} onBlur={() => window.api.saveWeights(weights)} className="w-8 bg-black/20 border border-white/10 rounded p-0.5 text-center text-[10px] focus:outline-none focus:border-blue-500"/>
+                    </div>
+
                     <button onClick={() => handleDeleteMetric(m.id)} className="p-1 text-white/20 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors"><Trash2 size={12} /></button>
                   </div>
                 </div>
               );
             })}
-            {!isAdding ? (<button onClick={() => setIsAdding(true)} className="w-full py-2 border border-dashed border-white/20 rounded-lg text-white/40 text-xs hover:text-white hover:border-white/40 transition-colors flex items-center justify-center gap-2 shrink-0"><Plus size={14} /> Add New Metric</button>) : (<div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg space-y-3 animate-fade-in shrink-0"><div className="flex gap-2"><input placeholder="Name" value={newMetricName} onChange={e => setNewMetricName(e.target.value)} className="flex-1 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/><input placeholder="Unit" value={newMetricUnit} onChange={e => setNewMetricUnit(e.target.value)} className="w-20 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/></div><div className="flex flex-wrap gap-2">{AVAILABLE_ICONS.map(iconKey => (<button key={iconKey} onClick={() => setNewMetricIcon(iconKey)} className={`p-1.5 rounded transition-all ${newMetricIcon === iconKey ? 'bg-blue-500 text-white' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}>{React.cloneElement(ICON_MAP[iconKey], { size: 14 })}</button>))}</div><div className="flex gap-2 pt-1"><button onClick={handleAddMetric} className="flex-1 py-1.5 bg-blue-600 rounded text-xs hover:bg-blue-500">Confirm</button><button onClick={() => setIsAdding(false)} className="px-3 py-1.5 bg-white/5 rounded text-xs hover:bg-white/10">Cancel</button></div></div>)}
-            <div className="mt-8 pt-4 border-t border-white/10 pb-4"><div className="flex items-center gap-2 mb-3"><Save size={12} className="text-white/30"/><span className="text-[10px] uppercase text-white/30 tracking-widest">Data Backup</span></div><div className="flex gap-2"><button onClick={handleExport} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-black/20 hover:bg-blue-600/20 border border-white/5 hover:border-blue-500/50 rounded-lg text-xs transition-all group"><Download size={14} className="text-blue-400 group-hover:text-blue-300" /> <span className="text-blue-100/80 group-hover:text-white">Export JSON</span></button><button onClick={handleImport} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-black/20 hover:bg-red-600/20 border border-white/5 hover:border-red-500/50 rounded-lg text-xs transition-all group"><Upload size={14} className="text-red-400 group-hover:text-red-300" /> <span className="text-red-100/80 group-hover:text-white">Import JSON</span></button></div></div>
+
+            {!isAdding ? (
+               <button onClick={() => setIsAdding(true)} className="w-full py-2 border border-dashed border-white/20 rounded-lg text-white/40 text-xs hover:text-white hover:border-white/40 transition-colors flex items-center justify-center gap-2 shrink-0"><Plus size={14} /> Add New Metric</button>
+            ) : (
+               <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg space-y-3 animate-fade-in shrink-0">
+                  <div className="flex gap-2">
+                     <input placeholder="Name" value={newMetricName} onChange={e => setNewMetricName(e.target.value)} className="flex-1 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/>
+                     <input placeholder="Unit" value={newMetricUnit} onChange={e => setNewMetricUnit(e.target.value)} className="w-20 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                      {AVAILABLE_ICONS.map(iconKey => (
+                        <button key={iconKey} onClick={() => setNewMetricIcon(iconKey)} className={`p-1.5 rounded transition-all ${newMetricIcon === iconKey ? 'bg-blue-500 text-white' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}>{React.cloneElement(ICON_MAP[iconKey], { size: 14 })}</button>
+                      ))}
+                  </div>
+                  <div className="flex gap-2 pt-1"><button onClick={handleAddMetric} className="flex-1 py-1.5 bg-blue-600 rounded text-xs hover:bg-blue-500">Confirm</button><button onClick={() => setIsAdding(false)} className="px-3 py-1.5 bg-white/5 rounded text-xs hover:bg-white/10">Cancel</button></div>
+               </div>
+            )}
+
+            <div className="mt-8 pt-4 border-t border-white/10 pb-4">
+              <div className="flex items-center gap-2 mb-3"><Save size={12} className="text-white/30"/><span className="text-[10px] uppercase text-white/30 tracking-widest">Data Backup</span></div>
+              <div className="flex gap-2">
+                <button onClick={handleExport} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-black/20 hover:bg-blue-600/20 border border-white/5 hover:border-blue-500/50 rounded-lg text-xs transition-all group"><Download size={14} className="text-blue-400 group-hover:text-blue-300" /> <span className="text-blue-100/80 group-hover:text-white">Export JSON</span></button>
+                <button onClick={handleImport} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-black/20 hover:bg-red-600/20 border border-white/5 hover:border-red-500/50 rounded-lg text-xs transition-all group"><Upload size={14} className="text-red-400 group-hover:text-red-300" /> <span className="text-red-100/80 group-hover:text-white">Import JSON</span></button>
+              </div>
+            </div>
           </div>
         </div>
       )}
