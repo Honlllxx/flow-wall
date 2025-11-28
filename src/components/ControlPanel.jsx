@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Activity, BookOpen, Coffee, Zap, Check, Trash2, List, RotateCcw, 
   Settings, Save, Plus, Star, Hash, Smile, Heart, Code, Music, 
-  Layers, Eye, EyeOff, GitGraph, Link2, Link2Off, Palette, Download, Upload, Target 
+  Layers, Eye, GitGraph, Link2, Link2Off, Palette, Download, Upload, Target, EyeOff
 } from 'lucide-react';
 
 const ICON_MAP = {
@@ -33,7 +33,7 @@ const ControlPanel = () => {
   
   const [displayConfig, setDisplayConfig] = useState({ 
     mode: 'single', combinedMetrics: [], multiMetrics: [], combinedColor: '#60A5FA',
-    combinedGoal: 0, showCombinedGoal: true, showSingleGoal: true 
+    combinedGoal: 0, showCombinedGoal: true
   });
 
   const [newMetricName, setNewMetricName] = useState('');
@@ -106,7 +106,7 @@ const ControlPanel = () => {
     if (!newMetricName || !newMetricUnit) return;
     const randomColor = DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)];
     const newMetric = { 
-      id: Date.now().toString(), label: newMetricName, unit: newMetricUnit, iconKey: newMetricIcon, color: randomColor, target: 0 
+      id: Date.now().toString(), label: newMetricName, unit: newMetricUnit, iconKey: newMetricIcon, color: randomColor, target: 0, showGoal: true 
     };
     
     const updatedMetrics = [...metrics, newMetric];
@@ -144,6 +144,10 @@ const ControlPanel = () => {
   const handleMetricUpdate = (metricId, changes) => {
     const updatedMetrics = metrics.map(m => m.id === metricId ? { ...m, ...changes } : m);
     setMetrics(updatedMetrics);
+    // 如果是 toggle 操作，立即保存，优化体验
+    if (changes.showGoal !== undefined) {
+        window.api.saveMetrics(updatedMetrics);
+    }
   };
 
   const toggleOverlay = () => {
@@ -154,7 +158,6 @@ const ControlPanel = () => {
     }
   };
 
-  // ✅【新增】切换目标显示状态 (AutoSave)
   const toggleGoalVisibility = (key) => {
     const newConfig = { ...displayConfig, [key]: !displayConfig[key] };
     setDisplayConfig(newConfig);
@@ -252,61 +255,40 @@ const ControlPanel = () => {
         </div>
       )}
 
-      {/* --- ✅ 视图 4: 目标设定 (带开关) --- */}
+      {/* --- Goals 视图 --- */}
       {view === 'goals' && (
         <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
           <h2 className="text-center text-white/50 text-xs mb-6 tracking-widest uppercase">Target Settings</h2>
           
           <div className="flex-1 space-y-6 overflow-y-auto px-2 custom-scrollbar pb-2">
             
-            {/* 1. 全局总目标 */}
+            {/* Total Goal */}
             <div className={`p-4 border rounded-xl transition-colors ${displayConfig.showCombinedGoal ? 'bg-gradient-to-br from-blue-900/30 to-purple-900/30 border-white/10' : 'bg-white/5 border-white/5 opacity-60'}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2 text-blue-200">
                   <Target size={16} />
                   <span className="text-xs font-bold uppercase tracking-wider">Total Daily Energy</span>
                 </div>
-                {/* ✅ 显隐开关 */}
-                <button 
-                  onClick={() => toggleGoalVisibility('showCombinedGoal')} 
-                  className={`p-1.5 rounded-full transition-colors ${displayConfig.showCombinedGoal ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/30 hover:text-white'}`}
-                  title={displayConfig.showCombinedGoal ? "Goal Line Visible" : "Goal Line Hidden"}
-                >
+                <button onClick={() => toggleGoalVisibility('showCombinedGoal')} className={`p-1.5 rounded-full transition-colors ${displayConfig.showCombinedGoal ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/30 hover:text-white'}`}>
                   {displayConfig.showCombinedGoal ? <Eye size={14} /> : <EyeOff size={14} />}
                 </button>
               </div>
-              
               <div className="flex items-end gap-2">
-                <input 
-                  type="number" 
-                  value={displayConfig.combinedGoal || ''}
-                  onChange={(e) => setDisplayConfig({...displayConfig, combinedGoal: Number(e.target.value)})}
-                  onBlur={() => window.api.saveDisplayConfig(displayConfig)}
-                  placeholder="0"
-                  className="w-full bg-transparent text-4xl font-thin text-white border-b border-white/20 focus:border-blue-500 outline-none pb-1"
-                />
+                <input type="number" value={displayConfig.combinedGoal || ''} onChange={(e) => setDisplayConfig({...displayConfig, combinedGoal: Number(e.target.value)})} onBlur={() => window.api.saveDisplayConfig(displayConfig)} placeholder="0" className="w-full bg-transparent text-4xl font-thin text-white border-b border-white/20 focus:border-blue-500 outline-none pb-1"/>
                 <span className="text-xs text-white/40 mb-2 font-mono">PTS</span>
               </div>
-              <p className="text-[10px] text-white/30 mt-2">Target for Combined & Overlay modes.</p>
+              <p className="text-[10px] text-white/30 mt-2">Visible in Combined & Overlay modes.</p>
             </div>
 
-            {/* 2. 单项指标目标 */}
+            {/* Individual Goals */}
             <div>
               <div className="flex items-center justify-between mb-3 pl-1">
                 <h3 className="text-[10px] uppercase text-white/30 tracking-widest">Individual Metrics</h3>
-                {/* ✅ 显隐开关 (控制 Auto 模式) */}
-                <button 
-                  onClick={() => toggleGoalVisibility('showSingleGoal')} 
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] transition-colors ${displayConfig.showSingleGoal ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white'}`}
-                >
-                  <span>{displayConfig.showSingleGoal ? "Visible" : "Hidden"} in Auto</span>
-                  {displayConfig.showSingleGoal ? <Eye size={12} /> : <EyeOff size={12} />}
-                </button>
               </div>
 
-              <div className={`space-y-2 transition-opacity ${displayConfig.showSingleGoal ? 'opacity-100' : 'opacity-60'}`}>
+              <div className="space-y-2">
                 {metrics.map(m => (
-                  <div key={m.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
+                  <div key={m.id} className={`flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5 transition-opacity ${m.showGoal !== false ? 'opacity-100' : 'opacity-60'}`}>
                     <div className="flex items-center gap-3">
                       <div className="opacity-70" style={{ color: m.color || '#60A5FA' }}>{ICON_MAP[m.iconKey] || <Hash size={18}/>}</div>
                       <div className="flex flex-col">
@@ -314,16 +296,26 @@ const ControlPanel = () => {
                         <span className="text-[10px] text-white/30">{m.unit}</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="number" 
-                        placeholder="-"
-                        value={m.target ?? ''} 
-                        onChange={(e) => handleMetricUpdate(m.id, { target: e.target.value === '' ? 0 : Number(e.target.value) })}
-                        onBlur={() => window.api.saveMetrics(metrics)}
-                        className="w-16 bg-black/20 border border-white/10 rounded p-1.5 text-center text-sm font-mono focus:outline-none focus:border-blue-500 text-yellow-200/90"
-                      />
-                      <span className="text-[10px] text-white/30">{m.unit}</span>
+                    
+                    <div className="flex items-center gap-3">
+                      {/* 目标值输入 */}
+                      <div className="flex items-center gap-1">
+                        <input 
+                          type="number" placeholder="-" 
+                          value={m.target ?? ''} 
+                          onChange={(e) => handleMetricUpdate(m.id, { target: e.target.value === '' ? 0 : Number(e.target.value) })}
+                          onBlur={() => window.api.saveMetrics(metrics)}
+                          className="w-14 bg-black/20 border border-white/10 rounded p-1.5 text-center text-sm font-mono focus:outline-none focus:border-blue-500 text-yellow-200/90"
+                        />
+                      </div>
+                      
+                      {/* ✅ 独立显示开关 */}
+                      <button 
+                        onClick={() => handleMetricUpdate(m.id, { showGoal: m.showGoal === undefined ? false : !m.showGoal })} 
+                        className={`p-1.5 rounded transition-colors ${m.showGoal !== false ? 'bg-white/10 text-white' : 'text-white/20 hover:text-white'}`}
+                      >
+                        {m.showGoal !== false ? <Eye size={14} /> : <EyeOff size={14} />}
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -334,6 +326,7 @@ const ControlPanel = () => {
         </div>
       )}
 
+      {/* --- Settings 视图 --- */}
       {view === 'settings' && (
         <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
           <h2 className="text-center text-white/50 text-xs mb-4 tracking-widest uppercase">Display Mode</h2>

@@ -14,7 +14,7 @@ const WallpaperOverlay = () => {
   const [weights, setWeights] = useState({});
   const [displayConfig, setDisplayConfig] = useState({ 
     mode: 'single', combinedMetrics: [], multiMetrics: [], combinedColor: '#60A5FA',
-    combinedGoal: 0, showCombinedGoal: true, showSingleGoal: true 
+    combinedGoal: 0, showCombinedGoal: true
   });
   const [metrics, setMetrics] = useState([]);
 
@@ -33,8 +33,8 @@ const WallpaperOverlay = () => {
     window.api.onMetricsUpdate(setMetrics);
   }, []);
 
-  const { chartData, displayInfo, areas, targetScore, maxY, activeGoalColor } = useMemo(() => {
-    if (allData.length === 0) return { chartData: [], displayInfo: null, areas: [], targetScore: null, maxY: 0, activeGoalColor: '#FFF' };
+  const { chartData, displayInfo, areas, referenceLines, maxY } = useMemo(() => {
+    if (allData.length === 0) return { chartData: [], displayInfo: null, areas: [], referenceLines: [], maxY: 0 };
 
     const getMetricColor = (label, index) => {
       const m = metrics.find(item => item.label === label);
@@ -53,11 +53,10 @@ const WallpaperOverlay = () => {
     let subTitle = "";
     let mainNumber = 0;
     let chartAreas = [];
-    let calculatedTargetScore = null;
     let currentMaxData = 0;
     
-    // ✅ 新增：用于存储目标线的颜色
-    let goalColor = '#FFFFFF'; 
+    // ✅ 目标线数组
+    let refLines = [];
 
     // =========================================================
     // 模式 A: Auto Single
@@ -68,16 +67,13 @@ const WallpaperOverlay = () => {
       title = `${targetType} · ${viewMode.toUpperCase()}`;
       
       const singleColor = getMetricColor(targetType, 0);
-      // ✅ 设定目标线颜色为当前指标颜色
-      goalColor = singleColor;
-
       chartAreas.push({ key: 'score', color: singleColor, fill: true, gradientId: 'gradFill', strokeWidth: 3 });
 
-      if (displayConfig.showSingleGoal !== false) {
-        const metricDef = metrics.find(m => m.label === targetType);
-        if (metricDef && metricDef.target > 0) {
-          calculatedTargetScore = getScore(Number(metricDef.target), targetType);
-        }
+      // Single Mode 的目标线
+      const metricDef = metrics.find(m => m.label === targetType);
+      if (metricDef && metricDef.target > 0 && metricDef.showGoal !== false) {
+        const goalVal = getScore(Number(metricDef.target), targetType);
+        refLines.push({ value: goalVal, color: singleColor, label: 'GOAL' });
       }
 
       if (viewMode === 'raw') {
@@ -130,16 +126,26 @@ const WallpaperOverlay = () => {
       else if (isMulti) activeMetrics = multiSelected;
       else activeMetrics = combinedSelected;
 
-      // ✅ 设定 Combined 模式下的目标线颜色为综合色
-      if (isOverlay || isCombined) {
-        goalColor = combinedColor;
-        if (displayConfig.showCombinedGoal !== false) {
-          if (displayConfig.combinedGoal > 0) {
-            calculatedTargetScore = displayConfig.combinedGoal;
-          }
-        }
+      // 1. Total Goal Line (Combined/Overlay)
+      if ((isOverlay || isCombined) && displayConfig.showCombinedGoal !== false && displayConfig.combinedGoal > 0) {
+        refLines.push({ value: displayConfig.combinedGoal, color: '#FFFFFF', label: 'TOTAL GOAL', opacity: 0.8 });
       }
 
+      // 2. Individual Goal Lines (Overlay/Multi)
+      if (isOverlay || isMulti) {
+        multiSelected.forEach(mName => {
+          const mDef = metrics.find(m => m.label === mName);
+          if (mDef && mDef.target > 0 && mDef.showGoal !== false) {
+             const goalVal = getScore(Number(mDef.target), mName);
+             // 只有当目标值在合理范围内（>0）才添加
+             if (goalVal > 0) {
+                refLines.push({ value: goalVal, color: mDef.color || '#FFF', label: `${mName.toUpperCase()}`, opacity: 0.6 });
+             }
+          }
+        });
+      }
+
+      // Areas
       if (isOverlay || isCombined) {
           if (combinedSelected.length > 0) {
             chartAreas.push({ key: 'totalScore', color: combinedColor, fill: true, gradientId: isOverlay ? 'totalFill' : 'combinedLineFill', strokeWidth: isOverlay ? 0 : 3 });
@@ -212,7 +218,9 @@ const WallpaperOverlay = () => {
       currentMaxData = maxVal;
     }
 
-    const finalMaxY = Math.max(currentMaxData, calculatedTargetScore || 0) * 1.15;
+    // ✅ 计算最大值：考虑所有可见的目标线
+    const maxGoal = refLines.length > 0 ? Math.max(...refLines.map(l => l.value)) : 0;
+    const finalMaxY = Math.max(currentMaxData, maxGoal) * 1.15;
 
     return { 
       chartData: processedData, 
@@ -220,9 +228,8 @@ const WallpaperOverlay = () => {
       areas: chartAreas, 
       metricDefs: metrics,
       combinedColor: displayConfig.combinedColor,
-      targetScore: calculatedTargetScore,
-      maxY: finalMaxY,
-      activeGoalColor: goalColor // ✅ 导出颜色
+      referenceLines: refLines, // 导出所有线
+      maxY: finalMaxY 
     };
   }, [allData, viewMode, weights, displayConfig, metrics]);
 
@@ -278,30 +285,30 @@ const WallpaperOverlay = () => {
                 />
             ))}
 
-            {/* ✅ 目标线：颜色现在是动态的 */}
-            {targetScore > 0 && (
+            {/* ✅ 渲染所有目标线 */}
+            {referenceLines.map((line, index) => (
               <ReferenceLine 
-                y={targetScore} 
-                stroke={activeGoalColor} // 使用计算出来的颜色
-                strokeOpacity={0.8}
+                key={index}
+                y={line.value} 
+                stroke={line.color} 
+                strokeOpacity={line.opacity || 0.8}
                 strokeDasharray="4 4" 
                 strokeWidth={1.5}
                 label={{ 
-                  value: 'GOAL', 
+                  value: line.label, 
                   position: 'insideBottomRight', 
-                  fill: activeGoalColor, // 文字也同色
-                  fontSize: 10,
+                  fill: line.color, 
+                  fontSize: 9,
                   fontWeight: 'bold',
-                  dy: -10
+                  dy: -5
                 }} 
               />
-            )}
+            ))}
 
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
-      {/* 看板 */}
       <div className="absolute top-16 right-16 text-slate-200 text-right select-none transition-all">
         <p className="text-xs font-bold tracking-[0.3em] opacity-40 uppercase mb-[-5px] text-blue-200">
           {displayInfo.title}

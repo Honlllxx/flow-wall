@@ -175,6 +175,19 @@ ipcMain.on('save-metrics', (event, metrics) => {
   if (controlWin) controlWin.webContents.send('metrics-updated', metrics);
 });
 
+
+// ...
+ipcMain.handle('get-metrics', () => {
+  const defaultMetrics = [
+    // ✅ 新增 showGoal: true 默认开启
+    { id: 'reading', label: '阅读', unit: '页', iconKey: 'book', color: '#60A5FA', target: 0, showGoal: true },
+    { id: 'fitness', label: '健身', unit: '分钟', iconKey: 'activity', color: '#F87171', target: 0, showGoal: true },
+    { id: 'focus',   label: '专注', unit: '小时', iconKey: 'zap', color: '#FBBF24', target: 0, showGoal: true },
+    { id: 'water',   label: '饮水', unit: 'ml',   iconKey: 'coffee', color: '#34D399', target: 0, showGoal: true },
+  ];
+  return store.get('user-metrics', defaultMetrics);
+});
+
 // 获取/保存 权重 (Weights)
 ipcMain.handle('get-weights', () => {
   return store.get('weights', { '阅读': 10, '健身': 5, '专注': 20, '饮水': 0.1 });
