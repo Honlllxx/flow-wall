@@ -9,14 +9,13 @@ let wallpaperWin = null;
 let controlWin = null;
 let tray = null;
 
-// 【新增】关闭硬件加速（解决 Windows 下透明窗口变白/黑的问题）
+// 关闭硬件加速防止黑屏/白屏
 app.disableHardwareAcceleration();
 
 // ==========================================
 // 1. 窗口管理
 // ==========================================
 
-// 创建“隐形”壁纸层
 function createWallpaperWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
@@ -49,11 +48,10 @@ function createWallpaperWindow() {
   wallpaperWin.loadURL(startURL);
 }
 
-// 创建极简控制面板
 function createControlPanel() {
   controlWin = new BrowserWindow({
     width: 400,
-    height: 550, // 修正高度：550 以容纳底部备份按钮
+    height: 600, // 稍微加高一点以容纳更多设置
     frame: false,
     transparent: true,
     show: false, 
@@ -113,11 +111,10 @@ ipcMain.handle('get-data', () => {
   return store.get('stats', []);
 });
 
-// 添加记录
 ipcMain.on('add-entry', (event, newEntry) => {
   const currentData = store.get('stats', []) || [];
   
-  // ✅ 修正时区问题：使用本地时间构建日期字符串
+  // 本地日期处理
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -127,29 +124,26 @@ ipcMain.on('add-entry', (event, newEntry) => {
   const entry = {
     ...newEntry,
     id: Date.now(),
-    date: localDate, // YYYY-MM-DD (本地时间)
+    date: localDate,
     timestamp: Date.now()
   };
   
   const updatedData = [...currentData, entry];
-  // ✅ 修正容量：保留 1000 条，30条太少了
-  if (updatedData.length > 1000) updatedData.shift();
+  if (updatedData.length > 2000) updatedData.shift(); // 增加容量
   
   store.set('stats', updatedData);
   
-  // ✅ 修正通信：同时通知两个窗口
+  // 广播
   if (wallpaperWin) wallpaperWin.webContents.send('data-updated', updatedData);
   if (controlWin) controlWin.webContents.send('data-updated', updatedData);
 });
 
-// 删除记录
 ipcMain.on('delete-entry', (event, id) => {
   const currentData = store.get('stats', []) || [];
   const newData = currentData.filter(item => item.id !== id);
   
   store.set('stats', newData);
   
-  // 同时通知两个窗口
   if (wallpaperWin) wallpaperWin.webContents.send('data-updated', newData);
   if (controlWin) controlWin.webContents.send('data-updated', newData);
 });
@@ -157,29 +151,9 @@ ipcMain.on('delete-entry', (event, id) => {
 
 // --- B. 配置管理 (指标、权重、显示模式) ---
 
-// 获取/保存 指标定义 (Metrics)
+// 1. 获取/保存 指标定义 (Metrics)
 ipcMain.handle('get-metrics', () => {
   const defaultMetrics = [
-    { id: 'reading', label: '阅读', unit: '页', iconKey: 'book', color: '#60A5FA' },
-    { id: 'fitness', label: '健身', unit: '分钟', iconKey: 'activity', color: '#F87171' },
-    { id: 'focus',   label: '专注', unit: '小时', iconKey: 'zap', color: '#FBBF24' },
-    { id: 'water',   label: '饮水', unit: 'ml',   iconKey: 'coffee', color: '#34D399' },
-  ];
-  return store.get('user-metrics', defaultMetrics);
-});
-
-ipcMain.on('save-metrics', (event, metrics) => {
-  store.set('user-metrics', metrics);
-  // ✅ 修正通信：必须通知壁纸层（为了颜色），也要通知控制板（为了列表）
-  if (wallpaperWin) wallpaperWin.webContents.send('metrics-updated', metrics);
-  if (controlWin) controlWin.webContents.send('metrics-updated', metrics);
-});
-
-
-// ...
-ipcMain.handle('get-metrics', () => {
-  const defaultMetrics = [
-    // ✅ 新增 showGoal: true 默认开启
     { id: 'reading', label: '阅读', unit: '页', iconKey: 'book', color: '#60A5FA', target: 0, showGoal: true },
     { id: 'fitness', label: '健身', unit: '分钟', iconKey: 'activity', color: '#F87171', target: 0, showGoal: true },
     { id: 'focus',   label: '专注', unit: '小时', iconKey: 'zap', color: '#FBBF24', target: 0, showGoal: true },
@@ -188,7 +162,13 @@ ipcMain.handle('get-metrics', () => {
   return store.get('user-metrics', defaultMetrics);
 });
 
-// 获取/保存 权重 (Weights)
+ipcMain.on('save-metrics', (event, metrics) => {
+  store.set('user-metrics', metrics);
+  if (wallpaperWin) wallpaperWin.webContents.send('metrics-updated', metrics);
+  if (controlWin) controlWin.webContents.send('metrics-updated', metrics);
+});
+
+// 2. 获取/保存 权重 (Weights)
 ipcMain.handle('get-weights', () => {
   return store.get('weights', { '阅读': 10, '健身': 5, '专注': 20, '饮水': 0.1 });
 });
@@ -199,22 +179,19 @@ ipcMain.on('save-weights', (event, weights) => {
   if (controlWin) controlWin.webContents.send('weights-updated', weights);
 });
 
-// 获取/保存 显示配置 (Display Config)
-// ✅ 修正冲突：合并了之前的重复定义，包含了 combinedColor 和两个列表
+// 3. 获取/保存 显示配置 (Display Config)
 ipcMain.handle('get-display-config', () => {
   return store.get('display-config', { 
     mode: 'single', 
     combinedMetrics: [], 
-    multiMetrics: [],
-    combinedColor: '#60A5FA' ,
-    combinedGoal: 0 ,// ✅ 新增：综合总目标分数
-    // ✅ 新增：控制目标线的显示/隐藏 (默认显示)
-    showCombinedGoal: true, 
-    showSingleGoal: true  ,
-    // ✅ 新增：Individual 目标线的全局控制
-    showIndividualGoals: true, // 总开关
-    individualGoalModes: ['single', 'multi', 'overlay'] // 默认在这些模式下显示，Combined模式默认不显示太乱
-      
+    multiMetrics: [], 
+    combinedColor: '#60A5FA',
+    combinedGoal: 0, 
+    showCombinedGoal: true,
+    showIndividualGoals: true,
+    individualGoalModes: ['single', 'multi', 'overlay'],
+    visibleButtons: ['raw', 'hour', 'day'], 
+    customRanges: []
   });
 });
 
@@ -229,7 +206,7 @@ ipcMain.on('save-display-config', (event, config) => {
 
 ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) {
+  if (win && !win.isDestroyed()) {
     win.setIgnoreMouseEvents(ignore, options);
   }
 });
@@ -287,7 +264,7 @@ ipcMain.handle('import-data', async () => {
       if (data.metrics) store.set('user-metrics', data.metrics);
       if (data.displayConfig) store.set('display-config', data.displayConfig);
 
-      // 通知所有窗口立即刷新数据
+      // 刷新所有窗口
       const wins = [wallpaperWin, controlWin];
       wins.forEach(w => {
         if (w && !w.isDestroyed()) {

@@ -8,13 +8,24 @@ const COLORS = [
 
 const FALLBACK_COLORS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
 
+// ✅【修改 1】名称修改：'7 Days' -> 'Days'
+const STANDARD_RANGES = [
+  { id: 'raw', label: 'Latest' },
+  { id: 'hour', label: 'Today' },
+  { id: 'day', label: 'Days' }, // 原 7 Days
+  { id: 'week', label: 'Week' },
+  { id: 'month', label: 'Month' },
+  { id: 'year', label: 'Year' },
+];
+
 const WallpaperOverlay = () => {
   const [allData, setAllData] = useState([]);
-  const [viewMode, setViewMode] = useState('raw');
+  const [viewMode, setViewMode] = useState('raw'); 
   const [weights, setWeights] = useState({});
   const [displayConfig, setDisplayConfig] = useState({ 
     mode: 'single', combinedMetrics: [], multiMetrics: [], combinedColor: '#60A5FA',
-    combinedGoal: 0, showCombinedGoal: true, showIndividualGoals: true, individualGoalModes: ['single', 'multi', 'overlay']
+    combinedGoal: 0, showCombinedGoal: true, showIndividualGoals: true, individualGoalModes: [],
+    visibleButtons: ['raw', 'hour', 'day'], customRanges: []
   });
   const [metrics, setMetrics] = useState([]);
 
@@ -33,8 +44,8 @@ const WallpaperOverlay = () => {
     window.api.onMetricsUpdate(setMetrics);
   }, []);
 
-  const { chartData, displayInfo, areas, referenceLines, maxY } = useMemo(() => {
-    if (allData.length === 0) return { chartData: [], displayInfo: null, areas: [], referenceLines: [], maxY: 0 };
+  const { chartData, displayInfo, areas, referenceLines, maxY, activeButtons } = useMemo(() => {
+    if (allData.length === 0) return { chartData: [], displayInfo: null, areas: [], referenceLines: [], maxY: 0, activeButtons: [] };
 
     const getMetricColor = (label, index) => {
       const m = metrics.find(item => item.label === label);
@@ -48,207 +59,300 @@ const WallpaperOverlay = () => {
 
     const combinedColor = displayConfig.combinedColor || '#60A5FA';
 
-    let processedData = [];
-    let title = "";
-    let subTitle = "";
-    let mainNumber = 0;
-    let chartAreas = [];
-    let currentMaxData = 0;
-    let refLines = [];
+    // --- 1. 时间窗口计算 (Fix for Week/Month/Year) ---
+    const getStartDate = (mode) => {
+      const now = new Date();
+      now.setHours(0, 0, 0, 0); 
+      
+      if (mode === 'hour') return now; 
+      
+      const d = new Date(now);
+      if (mode === 'day') {
+          d.setDate(d.getDate() - 6); // Last 7 days
+      }
+      else if (mode === 'week') {
+          // This Week (Start Monday)
+          const day = d.getDay() || 7; 
+          d.setHours(-24 * (day - 1)); 
+      }
+      else if (mode === 'month') {
+          // This Month (1st)
+          d.setDate(1); 
+      }
+      else if (mode === 'year') {
+          // This Year (Jan 1st)
+          d.setMonth(0, 1); 
+      }
+      else if (mode.startsWith('custom_')) {
+          const custom = (displayConfig.customRanges || []).find(r => r.id === mode);
+          if (custom) d.setDate(d.getDate() - (custom.days - 1));
+      }
+      return d;
+    };
 
-    // ==========================================
-    // 1. 统一处理目标线 (Goal Lines)
-    // ==========================================
+    const startDate = getStartDate(viewMode);
+    const isHourly = viewMode === 'hour';
+    const isRaw = viewMode === 'raw';
+    const isYear = viewMode === 'year';
     
-    // A. Total Goal Line
-    const showTotal = (displayConfig.mode === 'combined' || displayConfig.mode === 'overlay') && displayConfig.showCombinedGoal !== false && displayConfig.combinedGoal > 0;
-    if (showTotal) {
-      refLines.push({ value: displayConfig.combinedGoal, color: '#FFFFFF', label: 'TOTAL GOAL', opacity: 0.9, width: 2 });
-    }
-
-    // B. Individual Goal Lines
-    // 检查全局开关 和 模式过滤
-    const showIndivGlobal = displayConfig.showIndividualGoals !== false;
-    const allowedModes = displayConfig.individualGoalModes || ['single', 'multi', 'overlay'];
-    const isModeAllowed = allowedModes.includes(displayConfig.mode);
-
-    if (showIndivGlobal && isModeAllowed) {
-        // 确定哪些指标是“当前可见”的
-        let visibleMetrics = [];
-        if (displayConfig.mode === 'single') {
-            const lastEntry = allData[allData.length - 1];
-            if (lastEntry) visibleMetrics = [lastEntry.type];
-        } else if (displayConfig.mode === 'multi') {
-            visibleMetrics = displayConfig.multiMetrics || [];
-        } else if (displayConfig.mode === 'overlay') {
-            // 在 Overlay 模式下，通常只显示 Multi 列表里的独立线，或者全部
-            visibleMetrics = [...new Set([...(displayConfig.multiMetrics || []), ...(displayConfig.combinedMetrics || [])])];
-        } else if (displayConfig.mode === 'combined') {
-            // Combined 模式下通常只看总分，但用户如果在配置里开启了 'combined' 模式显示独立线，则显示
-            visibleMetrics = displayConfig.combinedMetrics || [];
-        }
-
-        // 遍历可见指标，添加目标线
-        visibleMetrics.forEach(mName => {
-            const mDef = metrics.find(m => m.label === mName);
-            if (mDef && mDef.target > 0 && mDef.showGoal !== false) {
-                const goalVal = getScore(Number(mDef.target), mName);
-                if (goalVal > 0) {
-                    refLines.push({ 
-                        value: goalVal, 
-                        color: mDef.color || '#FFF', 
-                        label: `${mName.toUpperCase()}`, 
-                        opacity: 0.6, 
-                        width: 1 
-                    });
-                }
-            }
-        });
-    }
-
-
-    // ==========================================
-    // 2. 模式处理逻辑
-    // ==========================================
-
+    // --- 2. 确定当前显示的指标 ---
+    let activeMetrics = [];
+    let combinedSelected = displayConfig.combinedMetrics || [];
+    let multiSelected = displayConfig.multiMetrics || [];
+    
     if (displayConfig.mode === 'single') {
-      const lastEntry = allData[allData.length - 1];
-      const targetType = lastEntry.type;
-      title = `${targetType} · ${viewMode.toUpperCase()}`;
-      
-      const singleColor = getMetricColor(targetType, 0);
-      chartAreas.push({ key: 'score', color: singleColor, fill: true, gradientId: 'gradFill', strokeWidth: 3 });
+        const lastEntry = allData[allData.length - 1];
+        if (lastEntry) activeMetrics = [lastEntry.type];
+    } else if (displayConfig.mode === 'overlay') {
+        activeMetrics = [...new Set([...combinedSelected, ...multiSelected])];
+    } else if (displayConfig.mode === 'multi') {
+        activeMetrics = multiSelected;
+    } else {
+        activeMetrics = combinedSelected;
+    }
 
-      if (viewMode === 'raw') {
-        const typeData = allData.filter(i => i.type === targetType).slice(-20);
-        processedData = typeData.map(item => ({
-          score: getScore(item.value, item.type),
-          label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }));
-        mainNumber = getScore(lastEntry.value, targetType);
-        subTitle = `Raw: ${lastEntry.value} ${lastEntry.unit}`;
-      } 
-      else { 
-        const bucketMap = {};
-        const isHour = viewMode === 'hour';
-        if (isHour) new Array(24).fill(0).forEach((_, i) => bucketMap[i] = 0);
-        else for(let i=6; i>=0; i--) { const d = new Date(); d.setDate(d.getDate()-i); bucketMap[d.toISOString().split('T')[0]] = 0; }
+    // --- 3. 生成图表区域配置 ---
+    let chartAreas = [];
+    if (displayConfig.mode === 'single') {
+        if (activeMetrics.length > 0) {
+            chartAreas.push({ key: 'score', color: getMetricColor(activeMetrics[0], 0), fill: true, gradientId: 'gradFill', strokeWidth: 3 });
+        }
+    } else {
+        if ((displayConfig.mode === 'overlay' || displayConfig.mode === 'combined') && combinedSelected.length > 0) {
+            chartAreas.push({ key: 'totalScore', color: combinedColor, fill: true, gradientId: displayConfig.mode === 'overlay' ? 'totalFill' : 'combinedLineFill', strokeWidth: displayConfig.mode === 'overlay' ? 0 : 3 });
+        }
+        if (displayConfig.mode === 'overlay' || displayConfig.mode === 'multi') {
+            multiSelected.forEach((metric, idx) => {
+                chartAreas.push({ key: metric, color: getMetricColor(metric, idx), fill: false, gradientId: null, strokeWidth: 3 });
+            });
+        }
+    }
+
+    // --- 4. 数据聚合处理 (Data Engine) ---
+    let processedData = [];
+    let mainNumber = 0;
+    
+    // >>> 分支 A: Raw 模式 (流水账)
+    if (isRaw) { 
+        let rawSourceData = allData;
+        if (displayConfig.mode === 'single') {
+             const targetType = activeMetrics[0];
+             rawSourceData = allData.filter(i => i.type === targetType);
+        } else {
+             rawSourceData = allData.filter(i => activeMetrics.includes(i.type));
+        }
         
-        allData.filter(i => i.type === targetType).forEach(i => {
-             const key = isHour ? new Date(i.timestamp).getHours() : i.date;
-             const isToday = new Date(i.timestamp).toDateString() === new Date().toDateString();
-             if (bucketMap[key] !== undefined && (viewMode === 'day' || isToday)) bucketMap[key] += i.value;
+        // 取最近 30 条
+        const filtered = rawSourceData.slice(-30);
+        
+        processedData = filtered.map(item => {
+            const point = { 
+                label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+            };
+            
+            // Single Mode
+            if (displayConfig.mode === 'single') {
+                point.score = getScore(item.value, item.type);
+            } 
+            // Multi/Combined Mode
+            else {
+                if (multiSelected.includes(item.type)) point[item.type] = getScore(item.value, item.type);
+                
+                // ✅ Raw模式下：如果想“流畅显示”，这里不应该强制补0
+                // 让 connectNulls 负责连接。
+                // 除非你希望看到“掉到底部”，这里可以把未发生的事件设为 0。
+                // 根据“逻辑0流畅显示”的要求，这里我们保留补0，以便看到起伏。
+                multiSelected.forEach(m => { if (m !== item.type) point[m] = 0; }); 
+
+                if (combinedSelected.includes(item.type)) point.totalScore = getScore(item.value, item.type);
+                else if (displayConfig.mode === 'overlay' || displayConfig.mode === 'combined') point.totalScore = 0;
+            }
+            return point;
         });
-        const currentHour = new Date().getHours();
-        processedData = Object.entries(bucketMap).map(([k, v]) => {
-            if (isHour && parseInt(k) > currentHour) return null;
-            return { score: getScore(v, targetType), label: isHour ? `${k}:00` : k.slice(5) };
-        }).filter(Boolean);
-        const totalRaw = processedData.reduce((acc, c) => acc + (c.score / (weights[targetType] || 1)), 0);
-        mainNumber = getScore(totalRaw, targetType);
-        subTitle = `Total: ${Math.round(totalRaw)} ${lastEntry.unit}`;
-      }
 
-      currentMaxData = Math.max(...processedData.map(d => d.score), 0);
-    } 
-    else {
-      const isMulti = displayConfig.mode === 'multi';
-      const isOverlay = displayConfig.mode === 'overlay';
-      const isCombined = displayConfig.mode === 'combined';
-
-      title = isOverlay ? "COMBINED + MULTI" : (isMulti ? "MULTI VIEW" : "COMBINED SUM");
-      
-      const combinedSelected = displayConfig.combinedMetrics || [];
-      const multiSelected = displayConfig.multiMetrics || [];
-      let activeMetrics = [];
-      if (isOverlay) activeMetrics = [...new Set([...combinedSelected, ...multiSelected])];
-      else if (isMulti) activeMetrics = multiSelected;
-      else activeMetrics = combinedSelected;
-
-      if (isOverlay || isCombined) {
-          if (combinedSelected.length > 0) {
-            chartAreas.push({ key: 'totalScore', color: combinedColor, fill: true, gradientId: isOverlay ? 'totalFill' : 'combinedLineFill', strokeWidth: isOverlay ? 0 : 3 });
-          }
-      }
-      if (isOverlay || isMulti) {
-          multiSelected.forEach((metric, idx) => {
-              chartAreas.push({ key: metric, color: getMetricColor(metric, idx), fill: false, gradientId: null, strokeWidth: 3 });
-          });
-      }
-
-      const bucketMap = {};
-      const isHour = viewMode === 'hour';
-      const isRaw = viewMode === 'raw';
-      
-      if (isRaw) {
-          const filtered = allData.filter(i => activeMetrics.includes(i.type)).slice(-30);
-          processedData = filtered.map((item) => {
-              const point = { label: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
-              if (multiSelected.includes(item.type)) point[item.type] = getScore(item.value, item.type);
-              multiSelected.forEach(m => { if (m !== item.type) point[m] = 0; });
-              if (combinedSelected.includes(item.type)) point.totalScore = getScore(item.value, item.type);
-              else if (isOverlay || isCombined) point.totalScore = 0;
-              return point;
-          });
-          const last = processedData[processedData.length-1];
-          mainNumber = last ? (last.totalScore || 0) : 0;
-          if (isMulti && !isOverlay) {
+        // 计算看板主数字 (Latest Value)
+        const last = processedData[processedData.length-1];
+        if (displayConfig.mode === 'single') mainNumber = last ? last.score : 0;
+        else if (displayConfig.mode === 'combined') mainNumber = last ? (last.totalScore || 0) : 0;
+        else mainNumber = last ? (last.totalScore || 0) : 0; // multi default fallback
+        
+        // Special case for Multi-only mode main number
+        if (displayConfig.mode === 'multi') {
              const lastEntry = filtered[filtered.length-1];
              mainNumber = lastEntry ? getScore(lastEntry.value, lastEntry.type) : 0;
-          }
-          subTitle = "Recent Flow";
-      } 
-      else {
-          if (isHour) new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
-          else for(let i=6; i>=0; i--) { const d = new Date(); d.setDate(d.getDate()-i); bucketMap[d.toISOString().split('T')[0]] = {}; }
-          allData.filter(i => activeMetrics.includes(i.type)).forEach(i => {
-               const key = isHour ? new Date(i.timestamp).getHours() : i.date;
-               const isToday = new Date(i.timestamp).toDateString() === new Date().toDateString();
-               if (bucketMap[key] && (viewMode === 'day' || isToday)) {
-                   const s = getScore(i.value, i.type);
-                   if (multiSelected.includes(i.type)) bucketMap[key][i.type] = (bucketMap[key][i.type] || 0) + s;
-                   if (combinedSelected.includes(i.type)) bucketMap[key].totalScore = (bucketMap[key].totalScore || 0) + s;
-               }
-          });
-          const currentHour = new Date().getHours();
-          processedData = Object.entries(bucketMap).map(([k, vals]) => {
-              if (isHour && parseInt(k) > currentHour) return null;
-              if (isMulti || isOverlay) multiSelected.forEach(metric => { if (vals[metric] === undefined) vals[metric] = 0; });
-              if (isCombined || isOverlay) if (vals.totalScore === undefined) vals.totalScore = 0;
-              return { label: isHour ? `${k}:00` : k.slice(5), ...vals };
-          }).filter(Boolean);
-          let totalSum = 0;
-          processedData.forEach(p => { totalSum += (p.totalScore || 0); });
-          if (isMulti && !isOverlay) {
-              totalSum = 0;
-              processedData.forEach(p => { multiSelected.forEach(m => totalSum += (p[m] || 0)); });
-          }
-          mainNumber = Math.round(totalSum);
-          subTitle = `Total: ${viewMode === 'hour' ? 'Today' : '7 Days'}`;
-      }
-      
-      const maxVal = Math.max(
-          ...processedData.map(d => d.totalScore || 0),
-          ...processedData.map(d => {
-              const vals = Object.values(d).filter(v => typeof v === 'number');
-              return Math.max(...vals, 0);
-          })
-      );
-      currentMaxData = maxVal;
+        }
+    } 
+    // >>> 分支 B: 聚合模式 (Hour, Day, Week, Month, Year)
+    else { 
+        const bucketMap = {};
+        const now = new Date();
+        
+        // ✅ [修复] 初始化时间桶 (确保有X轴刻度)
+        if (isHourly) {
+            new Array(24).fill(0).forEach((_, i) => bucketMap[i] = {});
+        } 
+        else if (isYear) {
+            // Year view: group by Month (YYYY-MM)
+            for(let i=0; i<12; i++) {
+                const d = new Date(startDate);
+                d.setMonth(i);
+                // 只显示到当前月份，或者显示全年
+                // 这里显示全年 12 个月
+                const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                bucketMap[key] = {};
+            }
+        } 
+        else {
+            // Daily granularity (Day, Week, Month, Custom)
+            // 循环每一天，直到今天
+            let loopDate = new Date(startDate);
+            // 安全限制：防止死循环 (最多366天)
+            let safeGuard = 0;
+            while (loopDate <= now && safeGuard < 366) {
+                const key = loopDate.toISOString().split('T')[0];
+                bucketMap[key] = {};
+                loopDate.setDate(loopDate.getDate() + 1);
+                safeGuard++;
+            }
+        }
+
+        // ✅ [修复] 填充数据
+        allData.filter(i => activeMetrics.includes(i.type) && new Date(i.timestamp) >= startDate).forEach(i => {
+             const d = new Date(i.timestamp);
+             let key;
+             
+             if (isHourly) {
+                 if (d.toDateString() === now.toDateString()) key = d.getHours(); // 只看今天的小时
+                 else return; // 不是今天的数据丢弃
+             }
+             else if (isYear) {
+                 key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+             }
+             else {
+                 key = i.date; // YYYY-MM-DD
+             }
+
+             // 只有当这个 key 在我们初始化的范围内才处理
+             if (bucketMap[key]) {
+                 const s = getScore(i.value, i.type);
+                 
+                 if (displayConfig.mode === 'single') {
+                     bucketMap[key].score = (bucketMap[key].score || 0) + s;
+                 } else {
+                     if (multiSelected.includes(i.type)) bucketMap[key][i.type] = (bucketMap[key][i.type] || 0) + s;
+                     if (combinedSelected.includes(i.type)) bucketMap[key].totalScore = (bucketMap[key].totalScore || 0) + s;
+                 }
+             }
+        });
+
+        // ✅ [修复] 扁平化与补 0
+        const currentHour = now.getHours();
+        processedData = Object.entries(bucketMap).map(([k, vals]) => {
+            if (isHourly && parseInt(k) > currentHour) return null; // 未来的小时不显示
+            
+            // 补 0 逻辑：确保聚合模式下，没有数据的点是 0
+            if (displayConfig.mode === 'single') {
+                if (vals.score === undefined) vals.score = 0;
+            } else {
+                if (displayConfig.mode === 'multi' || displayConfig.mode === 'overlay') 
+                    multiSelected.forEach(metric => { if (vals[metric] === undefined) vals[metric] = 0; });
+                if (displayConfig.mode === 'combined' || displayConfig.mode === 'overlay') 
+                    if (vals.totalScore === undefined) vals.totalScore = 0;
+            }
+
+            // 生成 Label
+            let label = k;
+            if (isHourly) label = `${k}:00`;
+            else if (isYear) {
+                const [y, m] = k.split('-');
+                const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                label = monthNames[parseInt(m)-1];
+            } else {
+                // Day/Week/Month: Show MM-DD
+                label = k.slice(5); 
+            }
+
+            return { label, ...vals };
+        }).filter(Boolean);
+
+        // 计算区间总和
+        let totalSum = 0;
+        processedData.forEach(p => { 
+            if (displayConfig.mode === 'single') totalSum += p.score;
+            else if (displayConfig.mode === 'combined' || displayConfig.mode === 'overlay') totalSum += (p.totalScore || 0);
+            else if (displayConfig.mode === 'multi') multiSelected.forEach(m => totalSum += (p[m] || 0));
+        });
+        mainNumber = Math.round(totalSum);
     }
 
-    // ✅ 动态计算 Y 轴最大值：考虑所有参考线的高度
+    // --- Titles ---
+    let title = "";
+    let subTitle = "";
+    let rangeText = viewMode.toUpperCase().replace('CUSTOM_', '');
+    if(viewMode === 'day') rangeText = '7 DAYS';
+    
+    if (displayConfig.mode === 'single') {
+        const targetType = activeMetrics[0] || 'NONE';
+        title = `${targetType} · ${rangeText}`;
+        subTitle = `Total: ${mainNumber}`;
+    } else {
+        title = displayConfig.mode === 'overlay' ? `COMBINED · ${rangeText}` : (displayConfig.mode === 'multi' ? `MULTI · ${rangeText}` : `SUM · ${rangeText}`);
+        subTitle = `Period Total: ${mainNumber}`;
+    }
+
+    // --- Goal Lines Logic ---
+    let refLines = [];
+    // 目标线只在 'raw' 或 'hour' (Daily view) 下显示才有意义
+    if (isHourly || isRaw) {
+        const showTotal = (displayConfig.mode === 'combined' || displayConfig.mode === 'overlay') && displayConfig.showCombinedGoal !== false && displayConfig.combinedGoal > 0;
+        if (showTotal) {
+          refLines.push({ value: displayConfig.combinedGoal, color: '#FFFFFF', label: 'GOAL', opacity: 0.9, width: 2 });
+        }
+
+        const showIndivGlobal = displayConfig.showIndividualGoals !== false;
+        const allowedModes = displayConfig.individualGoalModes || ['single', 'multi', 'overlay'];
+        const isModeAllowed = allowedModes.includes(displayConfig.mode);
+
+        if (showIndivGlobal && isModeAllowed) {
+            let goalMetrics = [];
+            if (displayConfig.mode === 'single') goalMetrics = activeMetrics;
+            else if (displayConfig.mode === 'multi' || displayConfig.mode === 'overlay') goalMetrics = multiSelected;
+            
+            goalMetrics.forEach(mName => {
+                const mDef = metrics.find(m => m.label === mName);
+                if (mDef && mDef.target > 0 && mDef.showGoal !== false) {
+                    const goalVal = getScore(Number(mDef.target), mName);
+                    if (goalVal > 0) refLines.push({ value: goalVal, color: mDef.color || '#FFF', label: mName.toUpperCase(), opacity: 0.6, width: 1 });
+                }
+            });
+        }
+    }
+
+    // Max Y
+    const currentMaxData = Math.max(
+        ...processedData.map(d => {
+            const vals = Object.values(d).filter(v => typeof v === 'number');
+            return Math.max(...vals, 0);
+        }), 0
+    );
     const maxGoal = refLines.length > 0 ? Math.max(...refLines.map(l => l.value)) : 0;
     const finalMaxY = Math.max(currentMaxData, maxGoal) * 1.15;
 
+    // ✅ Generate Buttons
+    const buttons = (displayConfig.visibleButtons || ['raw', 'hour', 'day']).map(id => {
+        return STANDARD_RANGES.find(r => r.id === id);
+    }).filter(Boolean);
+    (displayConfig.customRanges || []).forEach(r => {
+        buttons.push({ id: r.id, label: r.label });
+    });
+
     return { 
-      chartData: processedData, 
-      displayInfo: { title, subTitle, mainNumber }, 
-      areas: chartAreas, 
-      metricDefs: metrics,
-      combinedColor: displayConfig.combinedColor,
-      referenceLines: refLines,
-      maxY: finalMaxY 
+        chartData: processedData, 
+        displayInfo: { title, subTitle, mainNumber }, 
+        areas: chartAreas, 
+        referenceLines: refLines, 
+        maxY: finalMaxY,
+        activeButtons: buttons 
     };
   }, [allData, viewMode, weights, displayConfig, metrics]);
 
@@ -256,10 +360,24 @@ const WallpaperOverlay = () => {
 
   return (
     <div className="w-screen h-screen overflow-hidden relative pointer-events-none">
-      <div className="absolute bottom-[42vh] right-16 flex gap-2 z-10 pointer-events-auto" onMouseEnter={() => window.api.setIgnoreMouseEvents(false)} onMouseLeave={() => window.api.setIgnoreMouseEvents(true, { forward: true })}>
-        {['raw', 'hour', 'day'].map(mode => (
-          <button key={mode} onClick={() => setViewMode(mode)} className={`px-3 py-1 text-xs uppercase tracking-widest rounded-full border transition-all cursor-pointer ${viewMode === mode ? 'bg-white text-black border-white font-bold' : 'bg-black/20 text-white/40 border-white/10 hover:bg-white/10 hover:text-white'}`}>
-            {mode === 'raw' ? 'Latest' : mode}
+      
+      <div 
+        className="absolute bottom-[42vh] right-16 flex gap-2 z-10 pointer-events-auto flex-wrap justify-end max-w-[600px]"
+        onMouseEnter={() => window.api.setIgnoreMouseEvents(false)}
+        onMouseLeave={() => window.api.setIgnoreMouseEvents(true, { forward: true })}
+      >
+        {activeButtons.map(btn => (
+          <button
+            key={btn.id}
+            onClick={() => setViewMode(btn.id)}
+            className={`
+              px-3 py-1 text-xs uppercase tracking-widest rounded-full border transition-all cursor-pointer mb-1 ml-1
+              ${viewMode === btn.id 
+                ? 'bg-white text-black border-white font-bold' 
+                : 'bg-black/20 text-white/40 border-white/10 hover:bg-white/10 hover:text-white'}
+            `}
+          >
+            {btn.label}
           </button>
         ))}
       </div>
@@ -293,6 +411,7 @@ const WallpaperOverlay = () => {
             {areas.map((area) => (
                 <Area 
                   key={area.key}
+                  // ✅【核心】确保所有模式下线条连贯，空值为0会自动连到0
                   connectNulls={true}
                   type="monotone" 
                   dataKey={area.key} 
@@ -304,7 +423,6 @@ const WallpaperOverlay = () => {
                 />
             ))}
 
-            {/* ✅ 渲染所有目标线 */}
             {referenceLines.map((line, index) => (
               <ReferenceLine 
                 key={index}
@@ -328,6 +446,7 @@ const WallpaperOverlay = () => {
         </ResponsiveContainer>
       </div>
 
+      {/* 看板 (保持原样) */}
       <div className="absolute top-16 right-16 text-slate-200 text-right select-none transition-all">
         <p className="text-xs font-bold tracking-[0.3em] opacity-40 uppercase mb-[-5px] text-blue-200">
           {displayInfo.title}

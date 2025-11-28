@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Activity, BookOpen, Coffee, Zap, Check, Trash2, List, RotateCcw, 
   Settings, Save, Plus, Star, Hash, Smile, Heart, Code, Music, 
-  Layers, Eye, GitGraph, Link2, Link2Off, Palette, Download, Upload, Target, EyeOff
+  Layers, Eye, GitGraph, Link2, Link2Off, Palette, Download, Upload, Target, EyeOff,
+  Clock // 新增图标
 } from 'lucide-react';
 
 const ICON_MAP = {
@@ -21,6 +22,16 @@ const ICON_MAP = {
 const AVAILABLE_ICONS = ['star', 'code', 'music', 'heart', 'hash', 'smile', 'book', 'activity', 'zap', 'coffee'];
 const DEFAULT_COLORS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
 
+// 标准时间周期定义
+const STANDARD_RANGES = [
+  { id: 'raw', label: 'Latest (Raw)' },
+  { id: 'hour', label: 'Today (Hour)' },
+  { id: 'day', label: '7 Days (Day)' },
+  { id: 'week', label: 'This Week' },
+  { id: 'month', label: 'This Month' },
+  { id: 'year', label: 'This Year' },
+];
+
 const ControlPanel = () => {
   const [view, setView] = useState('record'); 
   const [step, setStep] = useState(1);
@@ -33,16 +44,20 @@ const ControlPanel = () => {
   
   const [displayConfig, setDisplayConfig] = useState({ 
     mode: 'single', combinedMetrics: [], multiMetrics: [], combinedColor: '#60A5FA',
-    combinedGoal: 0, showCombinedGoal: true,
-    // ✅ 默认值
-    showIndividualGoals: true,
-    individualGoalModes: ['single', 'multi', 'overlay']
+    combinedGoal: 0, showCombinedGoal: true, showIndividualGoals: true, individualGoalModes: ['single', 'multi', 'overlay'],
+    visibleButtons: ['raw', 'hour', 'day'], // 默认
+    customRanges: []
   });
 
   const [newMetricName, setNewMetricName] = useState('');
   const [newMetricUnit, setNewMetricUnit] = useState('');
   const [newMetricIcon, setNewMetricIcon] = useState('star');
   const [isAdding, setIsAdding] = useState(false);
+
+  // 自定义时间周期表单
+  const [newRangeLabel, setNewRangeLabel] = useState('');
+  const [newRangeDays, setNewRangeDays] = useState('');
+  const [isAddingRange, setIsAddingRange] = useState(false);
 
   const inputRef = useRef(null);
 
@@ -166,7 +181,6 @@ const ControlPanel = () => {
     window.api.saveDisplayConfig(newConfig);
   };
 
-  // ✅【新增】切换某个模式是否显示虚线
   const toggleGoalMode = (modeName) => {
     const currentModes = displayConfig.individualGoalModes || [];
     let newModes;
@@ -176,6 +190,42 @@ const ControlPanel = () => {
       newModes = [...currentModes, modeName];
     }
     const newConfig = { ...displayConfig, individualGoalModes: newModes };
+    setDisplayConfig(newConfig);
+    window.api.saveDisplayConfig(newConfig);
+  };
+
+  // ✅ 切换时间按钮可见性
+  const toggleTimeButton = (btnId) => {
+    const current = displayConfig.visibleButtons || [];
+    let next;
+    if (current.includes(btnId)) next = current.filter(b => b !== btnId);
+    else next = [...current, btnId];
+    
+    // 立即保存
+    const newConfig = { ...displayConfig, visibleButtons: next };
+    setDisplayConfig(newConfig);
+    window.api.saveDisplayConfig(newConfig);
+  };
+
+  // ✅ 添加自定义时间周期
+  const handleAddCustomRange = () => {
+    if (!newRangeLabel || !newRangeDays) return;
+    const newRange = {
+      id: `custom_${Date.now()}`,
+      label: newRangeLabel,
+      days: Number(newRangeDays)
+    };
+    const nextCustom = [...(displayConfig.customRanges || []), newRange];
+    const newConfig = { ...displayConfig, customRanges: nextCustom };
+    setDisplayConfig(newConfig);
+    window.api.saveDisplayConfig(newConfig);
+    setNewRangeLabel(''); setNewRangeDays(''); setIsAddingRange(false);
+  };
+
+  // ✅ 删除自定义时间周期
+  const handleDeleteCustomRange = (id) => {
+    const nextCustom = (displayConfig.customRanges || []).filter(r => r.id !== id);
+    const newConfig = { ...displayConfig, customRanges: nextCustom };
     setDisplayConfig(newConfig);
     window.api.saveDisplayConfig(newConfig);
   };
@@ -202,7 +252,7 @@ const ControlPanel = () => {
     <div className="pointer-events-auto h-full w-full bg-black/60 backdrop-blur-xl border border-white/10 rounded-2xl p-6 text-white flex flex-col relative overflow-hidden">
       
       <div className="absolute top-4 left-4 z-20">
-        {(view === 'settings' || view === 'goals') && (
+        {(view === 'settings' || view === 'goals' || view === 'ranges') && (
           <button onClick={handleSaveWeights} className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-full text-white transition-all shadow-lg border border-white/10 group">
             <Save size={14} className="group-hover:scale-110 transition-transform"/>
             <span className="text-xs font-medium tracking-wide">SAVE</span>
@@ -211,16 +261,20 @@ const ControlPanel = () => {
       </div>
 
       <div className="absolute top-4 right-4 flex gap-2 z-10">
+        {/* ✅ Range Settings Button */}
+        {view !== 'ranges' && (
+          <button onClick={() => setView('ranges')} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors" title="Time Ranges"><Clock size={18} /></button>
+        )}
         {view !== 'goals' && (
           <button onClick={() => setView('goals')} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors" title="Set Goals"><Target size={18} /></button>
         )}
         {view !== 'settings' && (
           <button onClick={() => setView('settings')} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors" title="Configuration"><Settings size={18} /></button>
         )}
-        {(view !== 'settings' && view !== 'goals') && (
+        {(view !== 'settings' && view !== 'goals' && view !== 'ranges') && (
           <button onClick={() => { setView(view === 'record' ? 'history' : 'record'); if (view !== 'record') loadData(); }} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors"><List size={18} /></button>
         )}
-        {(view === 'settings' || view === 'goals') && (
+        {(view === 'settings' || view === 'goals' || view === 'ranges') && (
            <button onClick={() => { window.api.getWeights().then(setWeights); window.api.getDisplayConfig().then(setDisplayConfig); window.api.getMetrics().then(setMetrics); setView('record'); }} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors"><RotateCcw size={18} /></button>
         )}
       </div>
@@ -271,7 +325,70 @@ const ControlPanel = () => {
         </div>
       )}
 
-      {/* --- Goals 视图 --- */}
+      {/* --- ✅ 视图 5: 时间周期管理 (Ranges) --- */}
+      {view === 'ranges' && (
+        <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
+          <h2 className="text-center text-white/50 text-xs mb-6 tracking-widest uppercase">Time Ranges</h2>
+          <div className="flex-1 space-y-6 overflow-y-auto px-2 custom-scrollbar pb-2">
+            
+            {/* Standard Ranges */}
+            <div>
+              <h3 className="text-[10px] uppercase text-white/30 tracking-widest mb-3 pl-1">Standard Buttons</h3>
+              <div className="space-y-2">
+                {STANDARD_RANGES.map(range => (
+                  <div key={range.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
+                    <span className="text-sm font-medium">{range.label}</span>
+                    <button 
+                      onClick={() => toggleTimeButton(range.id)} 
+                      className={`p-1.5 rounded transition-colors ${(displayConfig.visibleButtons || []).includes(range.id) ? 'bg-white/10 text-white' : 'text-white/20 hover:text-white'}`}
+                    >
+                      {(displayConfig.visibleButtons || []).includes(range.id) ? <Eye size={14} /> : <EyeOff size={14} />}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Ranges */}
+            <div>
+              <h3 className="text-[10px] uppercase text-white/30 tracking-widest mb-3 pl-1">Custom Ranges</h3>
+              <div className="space-y-2">
+                {(displayConfig.customRanges || []).map(range => (
+                  <div key={range.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
+                    <div className="flex flex-col">
+                        <span className="text-sm font-medium">{range.label}</span>
+                        <span className="text-[10px] text-white/30">{range.days} Days</span>
+                    </div>
+                    <button onClick={() => handleDeleteCustomRange(range.id)} className="p-1.5 text-white/20 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+
+                {!isAddingRange ? (
+                   <button onClick={() => setIsAddingRange(true)} className="w-full py-2 border border-dashed border-white/20 rounded-lg text-white/40 text-xs hover:text-white hover:border-white/40 transition-colors flex items-center justify-center gap-2">
+                     <Plus size={14} /> Add Range
+                   </button>
+                ) : (
+                   <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg space-y-3 animate-fade-in">
+                      <div className="flex gap-2">
+                         <input placeholder="Label (e.g. Last 30)" value={newRangeLabel} onChange={e => setNewRangeLabel(e.target.value)} className="flex-1 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/>
+                         <input placeholder="Days" type="number" value={newRangeDays} onChange={e => setNewRangeDays(e.target.value)} className="w-16 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button onClick={handleAddCustomRange} className="flex-1 py-1.5 bg-blue-600 rounded text-xs hover:bg-blue-500">Add</button>
+                        <button onClick={() => setIsAddingRange(false)} className="px-3 py-1.5 bg-white/5 rounded text-xs hover:bg-white/10">Cancel</button>
+                      </div>
+                   </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* --- Goals 视图 (保持不变) --- */}
       {view === 'goals' && (
         <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
           <h2 className="text-center text-white/50 text-xs mb-6 tracking-widest uppercase">Target Settings</h2>
@@ -301,31 +418,17 @@ const ControlPanel = () => {
               <div className="flex flex-col gap-2 mb-3 pl-1">
                 <div className="flex items-center justify-between">
                     <h3 className="text-[10px] uppercase text-white/30 tracking-widest">Individual Metrics</h3>
-                    {/* ✅ 全局总开关 */}
-                    <button 
-                        onClick={() => toggleGoalVisibility('showIndividualGoals')} 
-                        className={`p-1.5 rounded flex gap-2 items-center text-[10px] transition-colors ${displayConfig.showIndividualGoals !== false ? 'bg-blue-600/20 text-blue-200' : 'bg-white/5 text-white/30'}`}
-                    >
+                    <button onClick={() => toggleGoalVisibility('showIndividualGoals')} className={`p-1.5 rounded flex gap-2 items-center text-[10px] transition-colors ${displayConfig.showIndividualGoals !== false ? 'bg-blue-600/20 text-blue-200' : 'bg-white/5 text-white/30'}`}>
                         <span>Global {displayConfig.showIndividualGoals !== false ? 'On' : 'Off'}</span>
                         {displayConfig.showIndividualGoals !== false ? <Eye size={12} /> : <EyeOff size={12} />}
                     </button>
                 </div>
-
-                {/* ✅ 模式选择器 */}
                 <div className="flex gap-1.5 opacity-90">
                     {['single', 'combined', 'multi', 'overlay'].map(m => {
                         const isActive = (displayConfig.individualGoalModes || ['single', 'multi', 'overlay']).includes(m);
                         const labelMap = { single: 'Auto', combined: 'Sum', multi: 'Multi', overlay: 'Over' };
                         return (
-                            <button
-                                key={m}
-                                onClick={() => toggleGoalMode(m)}
-                                className={`px-2 py-1 rounded text-[9px] border transition-all ${
-                                    isActive 
-                                    ? 'bg-blue-500 text-white border-blue-500' 
-                                    : 'bg-transparent text-white/30 border-white/10 hover:border-white/30'
-                                }`}
-                            >
+                            <button key={m} onClick={() => toggleGoalMode(m)} className={`px-2 py-1 rounded text-[9px] border transition-all ${isActive ? 'bg-blue-500 text-white border-blue-500' : 'bg-transparent text-white/30 border-white/10 hover:border-white/30'}`}>
                                 {labelMap[m]}
                             </button>
                         )
@@ -338,10 +441,7 @@ const ControlPanel = () => {
                   <div key={m.id} className={`flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5 transition-opacity ${m.showGoal !== false ? 'opacity-100' : 'opacity-60'}`}>
                     <div className="flex items-center gap-3">
                       <div className="opacity-70" style={{ color: m.color || '#60A5FA' }}>{ICON_MAP[m.iconKey] || <Hash size={18}/>}</div>
-                      <div className="flex flex-col">
-                        <span className="text-sm font-medium">{m.label}</span>
-                        <span className="text-[10px] text-white/30">{m.unit}</span>
-                      </div>
+                      <div className="flex flex-col"><span className="text-sm font-medium">{m.label}</span><span className="text-[10px] text-white/30">{m.unit}</span></div>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-1">
@@ -355,12 +455,11 @@ const ControlPanel = () => {
                 ))}
               </div>
             </div>
-
           </div>
         </div>
       )}
 
-      {/* --- Settings 视图 (保持不变) --- */}
+      {/* --- Settings 视图 --- */}
       {view === 'settings' && (
         <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
           <h2 className="text-center text-white/50 text-xs mb-4 tracking-widest uppercase">Display Mode</h2>
@@ -384,7 +483,6 @@ const ControlPanel = () => {
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto px-2 custom-scrollbar pb-2">
-            
             {(displayConfig.mode === 'combined' || displayConfig.mode === 'overlay') && (
               <div className="flex items-center justify-between p-2 mb-2 bg-white/5 rounded-lg border border-white/10">
                 <div className="flex items-center gap-2"><Palette size={16} className="text-white/60"/><span className="text-xs font-medium">Total Sum Color</span></div>
@@ -396,17 +494,14 @@ const ControlPanel = () => {
                 </div>
               </div>
             )}
-
             {displayConfig.mode === 'overlay' && (
               <div className="p-2 mb-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[10px] text-blue-200 text-center animate-fade-in">Overlay Mode Active. Switch to <b>Combined</b> or <b>Multi</b> tabs to change selection.</div>
             )}
-
             {metrics.map(m => {
               const isMultiMode = displayConfig.mode === 'multi';
               const currentList = isMultiMode ? (displayConfig.multiMetrics || []) : (displayConfig.combinedMetrics || []);
               const isSelected = currentList.includes(m.label);
               const isModeEditable = displayConfig.mode === 'multi' || displayConfig.mode === 'combined';
-              
               return (
                 <div key={m.id} className={`flex items-center justify-between p-2 rounded-lg border shrink-0 transition-colors ${isSelected && isModeEditable ? 'bg-blue-500/10 border-blue-500/50' : 'bg-white/5 border-white/5'} ${!isModeEditable ? 'opacity-50' : ''}`}>
                   <div className="flex items-center gap-3 overflow-hidden flex-1">
@@ -418,24 +513,20 @@ const ControlPanel = () => {
                     <div className="opacity-70 text-blue-400 shrink-0" style={{ color: m.color || '#60A5FA' }}>{ICON_MAP[m.iconKey] || <Hash size={18}/>}</div>
                     <div className="flex flex-col"><span className="text-sm font-medium truncate">{m.label}</span><span className="text-[10px] text-white/30">{m.unit}</span></div>
                   </div>
-                  
                   <div className="flex items-center gap-1.5">
                     <div className="relative group/color">
                       <div className="w-3.5 h-3.5 rounded-full border border-white/20 overflow-hidden cursor-pointer" style={{ backgroundColor: m.color || '#60A5FA' }}></div>
                       <input type="color" value={m.color || '#60A5FA'} onChange={(e) => handleMetricUpdate(m.id, { color: e.target.value })} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"/>
                     </div>
-                    
                     <div className="flex flex-col items-center">
                         <span className="text-[8px] text-white/30 uppercase leading-none">Wt</span>
                         <input type="number" step="0.1" value={weights[m.label] !== undefined ? weights[m.label] : 1} onChange={(e) => setWeights({ ...weights, [m.label]: parseFloat(e.target.value) })} onBlur={() => window.api.saveWeights(weights)} className="w-8 bg-black/20 border border-white/10 rounded p-0.5 text-center text-[10px] focus:outline-none focus:border-blue-500"/>
                     </div>
-
                     <button onClick={() => handleDeleteMetric(m.id)} className="p-1 text-white/20 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors"><Trash2 size={12} /></button>
                   </div>
                 </div>
               );
             })}
-
             {!isAdding ? (
                <button onClick={() => setIsAdding(true)} className="w-full py-2 border border-dashed border-white/20 rounded-lg text-white/40 text-xs hover:text-white hover:border-white/40 transition-colors flex items-center justify-center gap-2 shrink-0"><Plus size={14} /> Add New Metric</button>
             ) : (
@@ -444,17 +535,14 @@ const ControlPanel = () => {
                      <input placeholder="Name" value={newMetricName} onChange={e => setNewMetricName(e.target.value)} className="flex-1 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/>
                      <input placeholder="Unit" value={newMetricUnit} onChange={e => setNewMetricUnit(e.target.value)} className="w-20 bg-black/20 border border-white/10 rounded p-1.5 text-xs focus:outline-none focus:border-blue-400"/>
                   </div>
-                  <div>
-                    <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2">
                       {AVAILABLE_ICONS.map(iconKey => (
                         <button key={iconKey} onClick={() => setNewMetricIcon(iconKey)} className={`p-1.5 rounded transition-all ${newMetricIcon === iconKey ? 'bg-blue-500 text-white' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}>{React.cloneElement(ICON_MAP[iconKey], { size: 14 })}</button>
                       ))}
-                    </div>
                   </div>
                   <div className="flex gap-2 pt-1"><button onClick={handleAddMetric} className="flex-1 py-1.5 bg-blue-600 rounded text-xs hover:bg-blue-500">Confirm</button><button onClick={() => setIsAdding(false)} className="px-3 py-1.5 bg-white/5 rounded text-xs hover:bg-white/10">Cancel</button></div>
                </div>
             )}
-
             <div className="mt-8 pt-4 border-t border-white/10 pb-4">
               <div className="flex items-center gap-2 mb-3"><Save size={12} className="text-white/30"/><span className="text-[10px] uppercase text-white/30 tracking-widest">Data Backup</span></div>
               <div className="flex gap-2">
