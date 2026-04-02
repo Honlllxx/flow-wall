@@ -3,8 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const isDev = require('electron-is-dev');
 const Store = require('electron-store');
+const AppUsageStore = require('./app-usage-store');
+const AppUsageTracker = require('./app-usage-tracker');
 
 const store = new Store();
+const appUsageStore = new AppUsageStore();
+const appUsageTracker = new AppUsageTracker();
 let wallpaperWin = null;
 let controlWin = null;
 let tray = null;
@@ -210,6 +214,160 @@ ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
     win.setIgnoreMouseEvents(ignore, options);
   }
 });
+
+
+// ==========================================
+// 4. 应用使用时间追踪 (App Usage Tracking)
+// ==========================================
+
+// --- A. 应用使用记录管理 ---
+
+ipcMain.handle('get-app-usage-records', (event, options = {}) => {
+  return appUsageStore.getAppUsageRecords(options);
+});
+
+ipcMain.handle('get-app-usage-summary', (event, dateRange = 'today') => {
+  return appUsageStore.getAppUsageSummary(dateRange);
+});
+
+ipcMain.handle('get-top-apps', (event, limit = 10) => {
+  const summary = appUsageStore.getAppUsageSummary('month');
+  return summary.topApps.slice(0, limit);
+});
+
+ipcMain.on('add-app-usage-record', (event, record) => {
+  const newRecord = appUsageStore.addAppUsageRecord(record);
+  // 广播更新
+  if (wallpaperWin) wallpaperWin.webContents.send('app-usage-updated', newRecord);
+  if (controlWin) controlWin.webContents.send('app-usage-updated', newRecord);
+});
+
+ipcMain.on('delete-app-usage-record', (event, id) => {
+  const deleted = appUsageStore.deleteAppUsageRecord(id);
+  if (deleted) {
+    // 广播更新
+    if (wallpaperWin) wallpaperWin.webContents.send('app-usage-record-deleted', id);
+    if (controlWin) controlWin.webContents.send('app-usage-record-deleted', id);
+  }
+});
+
+ipcMain.handle('update-app-category', (event, appName, category) => {
+  appUsageStore.updateAppCategory(appName, category);
+  return { success: true };
+});
+
+ipcMain.handle('get-app-category', (event, appName) => {
+  return appUsageStore.getAppCategory(appName);
+});
+
+ipcMain.handle('cleanup-app-usage-records', (event, maxAgeDays = 90) => {
+  const removedCount = appUsageStore.cleanupOldRecords(maxAgeDays);
+  return { success: true, removedCount };
+});
+
+// --- B. 浏览器使用记录管理 ---
+
+ipcMain.handle('get-browser-usage-records', (event, options = {}) => {
+  return appUsageStore.getBrowserUsageRecords(options);
+});
+
+ipcMain.handle('import-browser-usage-records', async (event, records) => {
+  const importedCount = appUsageStore.importBrowserUsageRecords(records);
+  // 广播更新
+  if (wallpaperWin) wallpaperWin.webContents.send('browser-usage-imported', importedCount);
+  if (controlWin) controlWin.webContents.send('browser-usage-imported', importedCount);
+  return { success: true, importedCount };
+});
+
+// --- C. 设置管理 ---
+
+ipcMain.handle('get-app-usage-settings', (event) => {
+  return appUsageStore.getAppUsageSettings();
+});
+
+ipcMain.on('update-app-usage-settings', (event, settings) => {
+  appUsageTracker.updateSettings(settings);
+});
+
+ipcMain.handle('get-browser-usage-settings', (event) => {
+  return appUsageStore.getBrowserUsageSettings();
+});
+
+ipcMain.on('update-browser-usage-settings', (event, settings) => {
+  appUsageStore.updateBrowserUsageSettings(settings);
+});
+
+// --- D. 数据导出 ---
+
+ipcMain.handle('export-app-usage-data', async (event, format = 'json') => {
+  const data = appUsageStore.exportAppUsageData(format);
+
+  if (format === 'json') {
+    const { filePath } = await dialog.showSaveDialog({
+      title: 'Export App Usage Data',
+      defaultPath: `app-usage-export-${Date.now()}.json`,
+      filters: [{ name: 'JSON Files', extensions: ['json'] }]
+    });
+
+    if (filePath) {
+      try {
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+        return { success: true, filePath };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+    return { success: false, cancelled: true };
+  } else if (format === 'csv') {
+    const { filePath } = await dialog.showSaveDialog({
+      title: 'Export App Usage Data',
+      defaultPath: `app-usage-export-${Date.now()}.csv`,
+      filters: [{ name: 'CSV Files', extensions: ['csv'] }]
+    });
+
+    if (filePath) {
+      try {
+        fs.writeFileSync(filePath, data);
+        return { success: true, filePath };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+    return { success: false, cancelled: true };
+  }
+
+  return { success: false, error: 'Unsupported format' };
+});
+
+// --- E. 追踪控制 ---
+
+ipcMain.handle('start-app-tracking', async (event, options = {}) => {
+  const success = appUsageTracker.startTracking(options);
+  if (success) {
+    // 广播追踪状态更新
+    const status = appUsageTracker.getTrackingStatus();
+    if (wallpaperWin) wallpaperWin.webContents.send('app-tracking-started', status);
+    if (controlWin) controlWin.webContents.send('app-tracking-started', status);
+  }
+  return success;
+});
+
+ipcMain.handle('stop-app-tracking', async (event) => {
+  const success = appUsageTracker.stopTracking();
+  if (success) {
+    // 广播追踪状态更新
+    const status = appUsageTracker.getTrackingStatus();
+    if (wallpaperWin) wallpaperWin.webContents.send('app-tracking-stopped', status);
+    if (controlWin) controlWin.webContents.send('app-tracking-stopped', status);
+  }
+  return success;
+});
+
+ipcMain.handle('get-app-tracking-status', (event) => {
+  return appUsageTracker.getTrackingStatus();
+});
+
+
 
 
 // ==========================================
