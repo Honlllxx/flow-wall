@@ -21,13 +21,19 @@
     }
   },
   "dependencies": {
+    "active-win": "^10.0.0",
+    "better-sqlite3": "^11.0.0",
     "classnames": "^2.5.1",
+    "csv-writer": "^1.6.0",
     "electron-is-dev": "^3.0.1",
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.555.0",
+    "node-cron": "^3.0.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.9.6",
-    "recharts": "^3.5.0"
+    "recharts": "^3.5.0",
+    "ws": "^8.17.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
