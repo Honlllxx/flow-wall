@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { 
-  Activity, BookOpen, Coffee, Zap, Check, Trash2, List, RotateCcw, 
-  Settings, Save, Plus, Star, Hash, Smile, Heart, Code, Music, 
+import {
+  Activity, BookOpen, Coffee, Zap, Check, Trash2, List, RotateCcw,
+  Settings, Save, Plus, Star, Hash, Smile, Heart, Code, Music,
   Layers, Eye, GitGraph, Link2, Link2Off, Palette, Download, Upload, Target, EyeOff,
-  Clock, Calendar as CalendarIcon, Grid, Search, BarChart2, Filter, X, AlertTriangle
+  Clock, Calendar as CalendarIcon, Grid, Search, BarChart2, Filter, X, AlertTriangle,
+  Monitor, Globe
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import AppUsagePanel from './AppUsagePanel';
+import BrowserUsagePanel from './BrowserUsagePanel';
 
 // --- 常量定义 ---
 const ICON_MAP = {
@@ -299,8 +302,10 @@ const ControlPanel = () => {
         {view !== 'ranges' && <button onClick={() => setView('ranges')} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors" title="Time Ranges"><Clock size={18} /></button>}
         {view !== 'goals' && <button onClick={() => setView('goals')} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors" title="Set Goals"><Target size={18} /></button>}
         {view !== 'settings' && <button onClick={() => setView('settings')} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors" title="Configuration"><Settings size={18} /></button>}
-        {(view !== 'settings' && view !== 'goals' && view !== 'ranges') && <button onClick={() => { setView(view === 'record' ? 'history' : 'record'); if (view !== 'record') loadData(); }} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors"><List size={18} /></button>}
-        {(view === 'settings' || view === 'goals' || view === 'ranges') && <button onClick={() => { window.api.getWeights().then(setWeights); window.api.getDisplayConfig().then(setDisplayConfig); window.api.getMetrics().then(setMetrics); setView('record'); }} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors"><RotateCcw size={18} /></button>}
+        {view !== 'app-usage' && <button onClick={() => setView('app-usage')} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors" title="应用使用时间"><Monitor size={18} /></button>}
+        {view !== 'browser-usage' && <button onClick={() => setView('browser-usage')} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors" title="网站使用时间"><Globe size={18} /></button>}
+        {(view !== 'settings' && view !== 'goals' && view !== 'ranges' && view !== 'app-usage' && view !== 'browser-usage') && <button onClick={() => { setView(view === 'record' ? 'history' : 'record'); if (view !== 'record') loadData(); }} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors"><List size={18} /></button>}
+        {(view === 'settings' || view === 'goals' || view === 'ranges' || view === 'app-usage' || view === 'browser-usage') && <button onClick={() => { window.api.getWeights().then(setWeights); window.api.getDisplayConfig().then(setDisplayConfig); window.api.getMetrics().then(setMetrics); setView('record'); }} className="p-2 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-colors"><RotateCcw size={18} /></button>}
       </div>
 
       {/* --- 1. Record Mode --- */}
@@ -508,6 +513,20 @@ const ControlPanel = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 6. App Usage View */}
+      {view === 'app-usage' && (
+        <div className="flex-1 flex flex-col w-full animate-fade-in overflow-hidden">
+          <AppUsagePanel />
+        </div>
+      )}
+
+      {/* 7. Browser Usage View */}
+      {view === 'browser-usage' && (
+        <div className="flex-1 flex flex-col w-full animate-fade-in overflow-hidden">
+          <BrowserUsagePanel />
         </div>
       )}
 
