@@ -3,10 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   getData: () => ipcRenderer.invoke('get-data'),
   addEntry: (data) => ipcRenderer.send('add-entry', data),
-  
+
   // 【新增】暴露删除方法
   deleteEntry: (id) => ipcRenderer.send('delete-entry', id),
-  
+
   // 监听数据更新（复用现有的逻辑即可）
   onDataUpdate: (callback) => ipcRenderer.on('data-updated', (event, data) => callback(data)),
 
@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('api', {
   saveWeights: (weights) => ipcRenderer.send('save-weights', weights),
   onWeightsUpdate: (callback) => ipcRenderer.on('weights-updated', (event, weights) => callback(weights)),
 
-   // ✅【新增】指标管理接口
+  // ✅【新增】指标管理接口
   getMetrics: () => ipcRenderer.invoke('get-metrics'),
   saveMetrics: (metrics) => ipcRenderer.send('save-metrics', metrics),
   onMetricsUpdate: (callback) => ipcRenderer.on('metrics-updated', (event, metrics) => callback(metrics)),
@@ -28,19 +28,23 @@ contextBridge.exposeInMainWorld('api', {
   saveDisplayConfig: (config) => ipcRenderer.send('save-display-config', config),
   onDisplayConfigUpdate: (callback) => ipcRenderer.on('display-config-updated', (event, config) => callback(config)),
 
-  
+
   //数据导入导出
-    getMetrics: () => ipcRenderer.invoke('get-metrics'),
-    saveMetrics: (metrics) => ipcRenderer.send('save-metrics', metrics),
-    onMetricsUpdate: (callback) => ipcRenderer.on('metrics-updated', (event, metrics) => callback(metrics)),
-    
-    getDisplayConfig: () => ipcRenderer.invoke('get-display-config'),
-    saveDisplayConfig: (config) => ipcRenderer.send('save-display-config', config),
-    onDisplayConfigUpdate: (callback) => ipcRenderer.on('display-config-updated', (event, config) => callback(config)),
-  
-    // ✅【新增】数据导入导出接口
-    exportData: () => ipcRenderer.invoke('export-data'),
-    importData: () => ipcRenderer.invoke('import-data'),
-    
-  
+  getMetrics: () => ipcRenderer.invoke('get-metrics'),
+  saveMetrics: (metrics) => ipcRenderer.send('save-metrics', metrics),
+  onMetricsUpdate: (callback) => ipcRenderer.on('metrics-updated', (event, metrics) => callback(metrics)),
+
+  getDisplayConfig: () => ipcRenderer.invoke('get-display-config'),
+  saveDisplayConfig: (config) => ipcRenderer.send('save-display-config', config),
+  onDisplayConfigUpdate: (callback) => ipcRenderer.on('display-config-updated', (event, config) => callback(config)),
+
+  // ✅【新增】数据导入导出接口
+  exportData: () => ipcRenderer.invoke('export-data'),
+  importData: () => ipcRenderer.invoke('import-data'),
+
+  // ✅【新增】开机自启接口
+  getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
+  setAutoLaunch: (enable) => ipcRenderer.send('set-auto-launch', enable),
+
+
 });
