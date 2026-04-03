@@ -19,8 +19,7 @@ const GoalsView = ({ data, actions }) => {
     } else {
       newModes = [...currentModes, modeName];
     }
-    const newConfig = { ...displayConfig, individualGoalModes: newModes };
-    saveDisplayConfig(newConfig);
+    saveDisplayConfig({ ...displayConfig, individualGoalModes: newModes });
   };
 
   const handleMetricUpdate = (metricId, changes) => {
@@ -31,9 +30,9 @@ const GoalsView = ({ data, actions }) => {
   return (
     <div className="flex-1 flex flex-col w-full animate-fade-in pt-8 min-h-0">
       <h2 className="text-center text-white/50 text-xs mb-6 tracking-widest uppercase">Target Settings</h2>
+      
       <div className="flex-1 space-y-6 overflow-y-auto px-2 custom-scrollbar pb-2">
         
-        {/* Total Goal */}
         <div className={`p-4 border rounded-xl transition-colors ${displayConfig.showCombinedGoal ? 'bg-gradient-to-br from-blue-900/30 to-purple-900/30 border-white/10' : 'bg-white/5 border-white/5 opacity-60'}`}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2 text-blue-200"><Target size={16} /><span className="text-xs font-bold uppercase tracking-wider">Total Daily Energy</span></div>
@@ -46,7 +45,6 @@ const GoalsView = ({ data, actions }) => {
           <p className="text-[10px] text-white/30 mt-2">Target for Combined & Overlay modes.</p>
         </div>
 
-        {/* Individual Goals */}
         <div>
           <div className="flex flex-col gap-2 mb-3 pl-1">
             <div className="flex items-center justify-between">
@@ -76,6 +74,7 @@ const GoalsView = ({ data, actions }) => {
             ))}
           </div>
         </div>
+
       </div>
     </div>
   );

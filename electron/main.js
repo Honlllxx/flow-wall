@@ -1,32 +1,20 @@
 const { app, BrowserWindow, screen, ipcMain, globalShortcut, Tray, Menu, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const isDev = require('electron-is-dev');
+// ❌ 删除: const isDev = require('electron-is-dev'); 
+// 我们改用 app.isPackaged (Electron 自带功能，更稳定)
 const Store = require('electron-store');
+
+// ✅【新增】应用使用追踪器
+const { getAppUsageTracker } = require('./modules/appUsageTracker');
 
 const store = new Store();
 let wallpaperWin = null;
 let controlWin = null;
 let tray = null;
 
-// 关闭硬件加速 (解决透明窗口黑屏/白屏的关键)
+// 关闭硬件加速 (解决 Windows 下透明窗口变白/黑的问题)
 app.disableHardwareAcceleration();
-
-// ==========================================
-// 0. 开机自启配置
-// ==========================================
-function updateAutoLaunch() {
-  // 获取当前可执行文件路径
-  const exePath = app.getPath('exe');
-  
-  app.setLoginItemSettings({
-    openAtLogin: true, // 开启开机自启
-    path: exePath,
-    args: [
-      '--process-start-args', `"--hidden"` // 可选：如果想静默启动
-    ]
-  });
-}
 
 // ==========================================
 // 1. 窗口管理
@@ -48,7 +36,6 @@ function createWallpaperWindow() {
     resizable: false,
     focusable: false, 
     webPreferences: {
-      // 生产环境下，preload 需要指向正确的位置
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
@@ -58,13 +45,17 @@ function createWallpaperWindow() {
   wallpaperWin.setIgnoreMouseEvents(true, { forward: true });
   wallpaperWin.setSkipTaskbar(true);
 
-  // ✅ 生产环境路径修正
-  // 打包后，dist 和 electron 文件夹通常是兄弟关系
-  const startURL = isDev 
-    ? 'http://localhost:5173/#/wallpaper' 
-    : `file://${path.join(__dirname, '../dist/index.html')}#/wallpaper`;
-
-  wallpaperWin.loadURL(startURL);
+  // ✅ 【关键修复】使用 app.isPackaged 判断环境
+  if (!app.isPackaged) {
+    // 开发环境：连接 Vite 服务器
+    wallpaperWin.loadURL('http://localhost:5173/#/wallpaper');
+    // wallpaperWin.webContents.openDevTools({ mode: 'detach' }); // 可选：开发时打开控制台
+  } else {
+    // 生产环境 (.exe)：加载本地文件
+    // main.js 在 /resources/app/electron/ 下，index.html 在 /resources/app/dist/ 下
+    const indexPath = path.join(__dirname, '../dist/index.html');
+    wallpaperWin.loadFile(indexPath, { hash: 'wallpaper' });
+  }
 }
 
 function createControlPanel() {
@@ -83,63 +74,75 @@ function createControlPanel() {
     }
   });
 
-  const startURL = isDev 
-    ? 'http://localhost:5173/#/control' 
-    : `file://${path.join(__dirname, '../dist/index.html')}#/control`;
-
-  controlWin.loadURL(startURL);
+  // ✅ 【关键修复】同上
+  if (!app.isPackaged) {
+    controlWin.loadURL('http://localhost:5173/#/control');
+  } else {
+    const indexPath = path.join(__dirname, '../dist/index.html');
+    controlWin.loadFile(indexPath, { hash: 'control' });
+  }
 
   controlWin.on('blur', () => controlWin.hide());
 }
 
 app.whenReady().then(() => {
-  // ✅ 注册开机自启
-  if (!isDev) {
-    updateAutoLaunch();
+  // 生产环境下注册开机自启
+  if (app.isPackaged) {
+    app.setLoginItemSettings({
+      openAtLogin: true,
+      path: app.getPath('exe'),
+      args: ['--process-start-args', `"--hidden"`]
+    });
   }
+
+  // ✅【新增】初始化应用使用追踪器
+  const appTracker = getAppUsageTracker();
+  appTracker.setupIPC();
+  
+  // 自动开始追踪（可选）
+  appTracker.start();
 
   createWallpaperWindow();
   createControlPanel();
 
   globalShortcut.register('Alt+D', () => {
-    if (controlWin.isVisible()) {
-      controlWin.hide();
-    } else {
-      controlWin.center();
-      controlWin.show();
-      controlWin.focus();
+    if (controlWin && !controlWin.isDestroyed()) {
+      if (controlWin.isVisible()) {
+        controlWin.hide();
+      } else {
+        controlWin.center();
+        controlWin.show();
+        controlWin.focus();
+      }
     }
   });
 
-  // ✅ 托盘图标路径修正 (生产环境需要找资源文件夹)
-  const iconPath = isDev 
-    ? path.join(__dirname, '../public/icon.png')
-    : path.join(process.resourcesPath, 'icon.png'); // 打包后图标位置
+  // ✅ 【关键修复】图标路径
+  const iconPath = !app.isPackaged
+    ? path.join(__dirname, '../public/icon.png') // 开发环境
+    : path.join(process.resourcesPath, 'icon.png'); // 生产环境
 
-  // 防止图标丢失导致报错，加个判断
   if (fs.existsSync(iconPath)) {
       tray = new Tray(iconPath);
       const contextMenu = Menu.buildFromTemplate([
-        { label: '显示控制板', click: () => controlWin.show() },
-        { label: '开机自启', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: () => {
-            const settings = app.getLoginItemSettings();
-            app.setLoginItemSettings({ openAtLogin: !settings.openAtLogin });
-        }},
-        { type: 'separator' },
-        { label: '退出 FlowWall', click: () => app.quit() }
+        { label: 'Show Panel', click: () => controlWin.show() },
+        { label: 'Exit', click: () => app.quit() }
       ]);
-      tray.setToolTip('FlowWall - 每日追踪');
+      tray.setToolTip('FlowWall');
       tray.setContextMenu(contextMenu);
   }
 });
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  
+  // ✅【新增】停止应用使用追踪
+  const appTracker = getAppUsageTracker();
+  appTracker.stop();
 });
 
-
 // ==========================================
-// 2. 核心业务逻辑 (IPC)
+// 2. IPC 核心逻辑
 // ==========================================
 
 ipcMain.handle('get-data', () => store.get('stats', []));
@@ -147,30 +150,31 @@ ipcMain.handle('get-data', () => store.get('stats', []));
 ipcMain.on('add-entry', (event, newEntry) => {
   const currentData = store.get('stats', []) || [];
   const now = new Date();
-  const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const localDate = `${year}-${month}-${day}`;
 
-  const entry = {
-    ...newEntry,
-    id: Date.now(),
-    date: localDate,
-    timestamp: Date.now()
-  };
-  
+  const entry = { ...newEntry, id: Date.now(), date: localDate, timestamp: Date.now() };
   const updatedData = [...currentData, entry];
   if (updatedData.length > 2000) updatedData.shift();
   
   store.set('stats', updatedData);
   
-  if (wallpaperWin) wallpaperWin.webContents.send('data-updated', updatedData);
-  if (controlWin) controlWin.webContents.send('data-updated', updatedData);
+  // 广播更新
+  [wallpaperWin, controlWin].forEach(w => {
+    if (w && !w.isDestroyed()) w.webContents.send('data-updated', updatedData);
+  });
 });
 
 ipcMain.on('delete-entry', (event, id) => {
   const currentData = store.get('stats', []) || [];
   const newData = currentData.filter(item => item.id !== id);
   store.set('stats', newData);
-  if (wallpaperWin) wallpaperWin.webContents.send('data-updated', newData);
-  if (controlWin) controlWin.webContents.send('data-updated', newData);
+  
+  [wallpaperWin, controlWin].forEach(w => {
+    if (w && !w.isDestroyed()) w.webContents.send('data-updated', newData);
+  });
 });
 
 ipcMain.handle('get-metrics', () => {
@@ -185,16 +189,18 @@ ipcMain.handle('get-metrics', () => {
 
 ipcMain.on('save-metrics', (event, metrics) => {
   store.set('user-metrics', metrics);
-  if (wallpaperWin) wallpaperWin.webContents.send('metrics-updated', metrics);
-  if (controlWin) controlWin.webContents.send('metrics-updated', metrics);
+  [wallpaperWin, controlWin].forEach(w => {
+    if (w && !w.isDestroyed()) w.webContents.send('metrics-updated', metrics);
+  });
 });
 
 ipcMain.handle('get-weights', () => store.get('weights', { '阅读': 10, '健身': 5, '专注': 20, '饮水': 0.1 }));
 
 ipcMain.on('save-weights', (event, weights) => {
   store.set('weights', weights);
-  if (wallpaperWin) wallpaperWin.webContents.send('weights-updated', weights);
-  if (controlWin) controlWin.webContents.send('weights-updated', weights);
+  [wallpaperWin, controlWin].forEach(w => {
+    if (w && !w.isDestroyed()) w.webContents.send('weights-updated', weights);
+  });
 });
 
 ipcMain.handle('get-display-config', () => {
@@ -202,19 +208,30 @@ ipcMain.handle('get-display-config', () => {
     mode: 'single', combinedMetrics: [], multiMetrics: [], combinedColor: '#60A5FA',
     combinedGoal: 0, showCombinedGoal: true, showIndividualGoals: true, 
     individualGoalModes: ['single', 'multi', 'overlay'],
-    visibleButtons: ['raw', 'hour', 'day'], customRanges: []
+    visibleButtons: ['raw', 'hour', 'day'], customRanges: [],
+    theme: 'dark', panelOpacity: 0.6
   });
 });
 
 ipcMain.on('save-display-config', (event, config) => {
   store.set('display-config', config);
-  if (wallpaperWin) wallpaperWin.webContents.send('display-config-updated', config);
-  if (controlWin) controlWin.webContents.send('display-config-updated', config);
+  [wallpaperWin, controlWin].forEach(w => {
+    if (w && !w.isDestroyed()) w.webContents.send('display-config-updated', config);
+  });
 });
 
 ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(ignore, options);
+});
+
+ipcMain.handle('get-auto-launch', () => app.getLoginItemSettings().openAtLogin);
+ipcMain.on('toggle-auto-launch', (event, openAtLogin) => {
+  app.setLoginItemSettings({
+    openAtLogin: openAtLogin,
+    path: app.getPath('exe'),
+    args: ['--process-start-args', `"--hidden"`]
+  });
 });
 
 ipcMain.handle('export-data', async () => {

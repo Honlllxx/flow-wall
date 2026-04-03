@@ -4,23 +4,31 @@
   "version": "1.0.0",
   "description": "A minimalist desktop flow tracker",
   "author": "Your Name",
+  
   "main": "electron/main.js",
+
   "scripts": {
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
     "dev:react": "vite",
     "dev:electron": "wait-on tcp:5173 && cross-env NODE_ENV=development electron .",
-    "build": "vite build && electron-builder"
+    "build": "vite build && electron-builder",
+    "build:native": "cd native/app-tracker && npm run build",
+    "rebuild:native": "cd native/app-tracker && npm run rebuild",
+    "install:native": "cd native/app-tracker && npm install"
   },
+
   "dependencies": {
     "classnames": "^2.5.1",
     "electron-is-dev": "^3.0.1",
-    "electron-store": "^6.0.1",
+    "electron-store": "^6.0.1", 
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.1",
-    "recharts": "^2.12.1"
+    "recharts": "^2.12.1",
+    "win32-api": "^26.1.2"
   },
+
   "devDependencies": {
     "@types/react": "^18.2.56",
     "@types/react-dom": "^18.2.19",
@@ -30,22 +38,27 @@
     "cross-env": "^7.0.3",
     "electron": "^29.1.0",
     "electron-builder": "^24.13.3",
+    "electron-rebuild": "^3.2.9",
+    "node-gyp": "^10.0.0",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "vite": "^5.1.4",
     "wait-on": "^7.2.0"
   },
+
   "build": {
     "appId": "com.flowwall.app",
     "productName": "FlowWall",
+    "copyright": "Copyright © 2024 Your Name",
     "directories": {
-      "output": "dist_electron"
+      "output": "release" 
     },
     "files": [
-      "dist/**/*",
-      "electron/**/*",
+      "dist/**/*",     
+      "electron/**/*",  
       "package.json"
     ],
+
     "extraResources": [
       {
         "from": "public/icon.png",
@@ -54,17 +67,20 @@
     ],
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
       ],
-      "icon": "public/icon.png", 
-      "requestedExecutionLevel": "asInvoker"
+      "icon": "public/icon.ico" 
     },
     "nsis": {
-      "oneClick": false,
+      "oneClick": false, 
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "runAfterFinish": true
+      "createDesktopShortcut": true, 
+      "createStartMenuShortcut": true, 
+      "shortcutName": "FlowWall",
+      "runAfterFinish": true 
     }
   }
 }

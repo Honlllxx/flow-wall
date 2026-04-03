@@ -1,50 +1,61 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  // 基础数据
   getData: () => ipcRenderer.invoke('get-data'),
   addEntry: (data) => ipcRenderer.send('add-entry', data),
-
-  // 【新增】暴露删除方法
   deleteEntry: (id) => ipcRenderer.send('delete-entry', id),
-
-  // 监听数据更新（复用现有的逻辑即可）
   onDataUpdate: (callback) => ipcRenderer.on('data-updated', (event, data) => callback(data)),
 
-  //切换曲线时间显示按钮
+  // 窗口交互
   setIgnoreMouseEvents: (ignore, options) => ipcRenderer.send('set-ignore-mouse-events', ignore, options),
 
-  // 【新增】权重相关
+  // 权重与配置
   getWeights: () => ipcRenderer.invoke('get-weights'),
   saveWeights: (weights) => ipcRenderer.send('save-weights', weights),
   onWeightsUpdate: (callback) => ipcRenderer.on('weights-updated', (event, weights) => callback(weights)),
 
-  // ✅【新增】指标管理接口
+  // 指标管理
   getMetrics: () => ipcRenderer.invoke('get-metrics'),
   saveMetrics: (metrics) => ipcRenderer.send('save-metrics', metrics),
   onMetricsUpdate: (callback) => ipcRenderer.on('metrics-updated', (event, metrics) => callback(metrics)),
 
-  // ✅【新增】显示配置接口
+  // 显示配置
   getDisplayConfig: () => ipcRenderer.invoke('get-display-config'),
   saveDisplayConfig: (config) => ipcRenderer.send('save-display-config', config),
   onDisplayConfigUpdate: (callback) => ipcRenderer.on('display-config-updated', (event, config) => callback(config)),
 
-
-  //数据导入导出
-  getMetrics: () => ipcRenderer.invoke('get-metrics'),
-  saveMetrics: (metrics) => ipcRenderer.send('save-metrics', metrics),
-  onMetricsUpdate: (callback) => ipcRenderer.on('metrics-updated', (event, metrics) => callback(metrics)),
-
-  getDisplayConfig: () => ipcRenderer.invoke('get-display-config'),
-  saveDisplayConfig: (config) => ipcRenderer.send('save-display-config', config),
-  onDisplayConfigUpdate: (callback) => ipcRenderer.on('display-config-updated', (event, config) => callback(config)),
-
-  // ✅【新增】数据导入导出接口
+  // 备份恢复
   exportData: () => ipcRenderer.invoke('export-data'),
   importData: () => ipcRenderer.invoke('import-data'),
 
   // ✅【新增】开机自启接口
   getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
-  setAutoLaunch: (enable) => ipcRenderer.send('set-auto-launch', enable),
+  toggleAutoLaunch: (flag) => ipcRenderer.send('toggle-auto-launch', flag),
 
-
+  // ✅【新增】应用使用追踪接口
+  appUsage: {
+    // 获取今日统计
+    getToday: () => ipcRenderer.invoke('app-usage:get-today'),
+    // 获取分类汇总
+    getCategories: () => ipcRenderer.invoke('app-usage:get-categories'),
+    // 设置应用分类
+    setCategory: (appName, category) => ipcRenderer.send('app-usage:set-category', appName, category),
+    // 获取应用分类
+    getCategory: (appName) => ipcRenderer.invoke('app-usage:get-category', appName),
+    // 开始追踪
+    start: () => ipcRenderer.send('app-usage:start'),
+    // 停止追踪
+    stop: () => ipcRenderer.send('app-usage:stop'),
+    // 检查运行状态
+    isRunning: () => ipcRenderer.invoke('app-usage:is-running'),
+    // 设置配置
+    setConfig: (config) => ipcRenderer.send('app-usage:set-config', config),
+    // 监听实时更新
+    onUpdate: (callback) => {
+      const listener = (event, data) => callback(data);
+      ipcRenderer.on('app-usage:update', listener);
+      return () => ipcRenderer.removeListener('app-usage:update', listener);
+    }
+  }
 });

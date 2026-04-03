@@ -14,24 +14,14 @@ const RecordView = ({ data, actions, isActive }) => {
     if (isActive && step === 2 && inputRef.current) inputRef.current.focus();
   }, [isActive, step]);
 
-  const handleSelect = (m) => {
-    setType(m.label);
-    setUnit(m.unit);
-    setStep(2);
-  };
-
-  const handleReset = () => {
-    setStep(1);
-    setVal('');
-    setType('');
-    setUnit('');
-  };
+  const handleSelect = (m) => { setType(m.label); setUnit(m.unit); setStep(2); };
+  const handleReset = () => { setStep(1); setVal(''); setType(''); setUnit(''); };
 
   const handleSubmit = (e) => {
     if (e.key === 'Enter' && val) {
       actions.addEntry({ type, unit, value: Number(val) });
       
-      // Auto-check logic
+      // 自动勾选逻辑
       let newConfig = { ...displayConfig };
       let configChanged = false;
       if ((newConfig.mode === 'multi' || newConfig.mode === 'overlay') && !newConfig.multiMetrics.includes(type)) {
@@ -44,21 +34,12 @@ const RecordView = ({ data, actions, isActive }) => {
       if (configChanged) actions.saveDisplayConfig(newConfig);
 
       setStep(3);
-      
-      // 自动重置定时器 (保留，防止用户不知道点哪里)
-      // 如果用户点了按钮，定时器会被组件卸载或状态变更覆盖，无大碍
-      setTimeout(() => { 
-        if (step === 3) { // 简单的防抖判断
-             handleReset(); 
-        }
-      }, 2000);
+      setTimeout(() => { if (step === 3) handleReset(); }, 2000); // 2秒后自动重置，也可点按钮
     }
   };
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center">
-      
-      {/* Step 1: Select */}
       {step === 1 && (
         <div className="w-full animate-fade-in px-1 max-h-[340px] overflow-y-auto custom-scrollbar">
           <h2 className="text-center text-white/50 text-xs mb-4 tracking-widest uppercase">Select Metric</h2>
@@ -72,34 +53,18 @@ const RecordView = ({ data, actions, isActive }) => {
           </div>
         </div>
       )}
-
-      {/* Step 2: Input */}
       {step === 2 && (
         <div className="w-full text-center animate-fade-in relative">
-          <button onClick={handleReset} className="absolute -top-8 left-0 p-1 text-white/20 hover:text-white transition-colors" title="Back">
-            <RotateCcw size={14} />
-          </button>
+          <button onClick={handleReset} className="absolute -top-8 left-0 p-1 text-white/20 hover:text-white transition-colors"><RotateCcw size={14} /></button>
           <h2 className="text-white/50 text-sm mb-6 tracking-widest">{type} ({unit})</h2>
           <input ref={inputRef} type="number" value={val} onChange={e => setVal(e.target.value)} onKeyDown={handleSubmit} placeholder="0" className="w-full bg-transparent text-6xl text-center font-thin focus:outline-none border-b border-white/20 focus:border-white/80 transition-colors pb-2"/>
           <p className="text-xs text-white/30 mt-4">Press Enter</p>
         </div>
       )}
-
-      {/* Step 3: Success & Return Button */}
       {step === 3 && (
         <div className="flex flex-col items-center animate-fade-in gap-4">
-          <div className="flex flex-col items-center text-green-400">
-              <Check size={48} />
-              <span className="mt-2 text-sm tracking-widest uppercase">Saved</span>
-          </div>
-          
-          {/* ✅ 新增：返回按钮 */}
-          <button 
-            onClick={handleReset} 
-            className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-full text-xs transition-colors text-white/80"
-          >
-            <Plus size={14} /> Record Another
-          </button>
+          <div className="flex flex-col items-center text-green-400"><Check size={48} /><span className="mt-2 text-sm tracking-widest uppercase">Saved</span></div>
+          <button onClick={handleReset} className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-full text-xs transition-colors text-white/80"><Plus size={14} /> Record Another</button>
         </div>
       )}
     </div>
