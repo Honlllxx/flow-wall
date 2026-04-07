@@ -9,6 +9,38 @@ contextBridge.exposeInMainWorld('api', {
 
   // 窗口交互
   setIgnoreMouseEvents: (ignore, options) => ipcRenderer.send('set-ignore-mouse-events', ignore, options),
+  resizeControlWindow: (width) => ipcRenderer.send('resize-control-window', width),
+  // 窗口拖动交互锁定
+  startWindowDrag: () => ipcRenderer.send('start-window-drag'),
+  endWindowDrag: () => ipcRenderer.send('end-window-drag'),
+  onWindowDragStateChange: (callback) => {
+    const listener = (event, isDragging) => callback(isDragging);
+    ipcRenderer.on('window-drag-state-change', listener);
+    return () => ipcRenderer.removeListener('window-drag-state-change', listener);
+  },
+  // 窗口交互锁定
+  onWindowInteractionLocked: (callback) => {
+    const listener = (event, data) => callback(data);
+    ipcRenderer.on('window-interaction-locked', listener);
+    return () => ipcRenderer.removeListener('window-interaction-locked', listener);
+  },
+  // 应用列表窗口
+  showAppList: () => ipcRenderer.send('show-app-list'),
+  closeAppList: () => ipcRenderer.send('close-app-list'),
+  // 应用详情窗口
+  showAppDetail: (appData) => ipcRenderer.send('show-app-detail', appData),
+  closeAppDetail: () => ipcRenderer.send('close-app-detail'),
+  getAppDetailData: () => ipcRenderer.invoke('get-app-detail-data'),
+  onAppDetailClosed: (callback) => ipcRenderer.on('app-detail-closed', () => callback()),
+  onAppDetailUpdated: (callback) => {
+    const listener = (event, appData) => callback(appData);
+    ipcRenderer.on('app-detail-updated', listener);
+    return () => ipcRenderer.removeListener('app-detail-updated', listener);
+  },
+  // 应用列表选择应用
+  appListSelect: (appData) => ipcRenderer.send('app-list-select', appData),
+  // 窗口返回功能
+  windowBack: () => ipcRenderer.send('window-back'),
 
   // 权重与配置
   getWeights: () => ipcRenderer.invoke('get-weights'),
