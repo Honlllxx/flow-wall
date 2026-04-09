@@ -383,6 +383,80 @@ function createAppDetailWindow(appData) {
   return appDetailWin;
 }
 
+// 关闭当前激活的窗口
+function closeFocusedWindow() {
+  const focusedWindow = BrowserWindow.getFocusedWindow();
+  
+  if (!focusedWindow) {
+    console.log('No focused window found');
+    return;
+  }
+  
+  // 检查是哪个窗口
+  if (focusedWindow === appDetailWin) {
+    console.log('Closing app detail window');
+    closeAppDetailWindow();
+  } else if (focusedWindow === appListWin) {
+    console.log('Closing app list window');
+    closeAppListWindow();
+  } else if (focusedWindow === controlWin) {
+    console.log('Closing control window');
+    controlWin.hide(); // 隐藏控制面板而不是关闭
+  } else {
+    console.log('Closing unknown window');
+    focusedWindow.close();
+  }
+}
+
+// 关闭应用列表面板窗口
+function closeAppListWindow() {
+  if (appListWin && !appListWin.isDestroyed()) {
+    console.log('关闭应用列表面板窗口');
+    
+    // 执行关闭动画
+    const bounds = appListWin.getBounds();
+    const windowWidth = 400; // 使用固定尺寸
+    // 向左滑出到屏幕外
+    const endX = -windowWidth;
+    
+    // 动画配置
+    const duration = 400; // 400ms动画
+    const frameDuration = 16; // ~60fps
+    const totalFrames = duration / frameDuration;
+    let currentFrame = 0;
+    
+    const animateSlideOut = () => {
+      if (!appListWin || appListWin.isDestroyed()) return;
+      
+      if (currentFrame >= totalFrames) {
+        appListWin.close();
+        appListWin = null;
+        console.log('应用列表面板窗口已关闭');
+        return;
+      }
+      
+      // 计算当前帧的位置和透明度（使用ease-in-out缓动）
+      const progress = currentFrame / totalFrames;
+      const easedProgress = easeInOutQuad(progress);
+      
+      const currentX = bounds.x - (bounds.x - endX) * easedProgress;
+      const opacity = 1 - progress;
+      
+      // 更新位置和透明度
+      appListWin.setPosition(Math.round(currentX), bounds.y);
+      appListWin.setOpacity(opacity);
+      
+      currentFrame++;
+      setTimeout(animateSlideOut, frameDuration);
+    };
+    
+    // 开始动画
+    animateSlideOut();
+  } else {
+    console.log('应用列表面板窗口已不存在或已销毁');
+  }
+}
+
 // 关闭应用详情面板窗口（带滑出动画）
 function closeAppDetailWindow() {
   console.log('关闭应用详情窗口');
@@ -645,6 +719,12 @@ app.whenReady().then(() => {
         controlWin.focus();
       }
     }
+  });
+  
+  // 注册ESC键关闭当前激活窗口
+  globalShortcut.register('Escape', () => {
+    console.log('ESC key pressed, closing focused window');
+    closeFocusedWindow();
   });
 
   // ✅ 【关键修复】图标路径
