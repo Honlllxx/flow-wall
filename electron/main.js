@@ -77,6 +77,7 @@ function createControlPanel() {
     show: false,
     resizable: false,
     alwaysOnTop: true,
+    focusable: true,
     useContentSize: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -155,6 +156,7 @@ function createAppListWindow() {
     show: false,
     resizable: false,
     alwaysOnTop: true,
+    focusable: true,
     useContentSize: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -175,6 +177,7 @@ function createAppListWindow() {
   appListWin.once('ready-to-show', () => {
     if (appListWin && !appListWin.isDestroyed()) {
       appListWin.show();
+      appListWin.focus(); // 确保窗口获得焦点
       
       // 执行从右向左的滑出动画（从 ControlPanel 边缘滑出到左侧）
       const animateSlide = () => {
@@ -312,6 +315,7 @@ function createAppDetailWindow(appData) {
     show: false,
     resizable: false,
     alwaysOnTop: true,
+    focusable: true,
     useContentSize: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -336,6 +340,7 @@ function createAppDetailWindow(appData) {
     console.log('应用详情窗口 ready-to-show');
     if (appDetailWin && !appDetailWin.isDestroyed()) {
       appDetailWin.show();
+      appDetailWin.focus(); // 确保窗口获得焦点
       
       // 执行从右向左的滑入动画（从屏幕外右侧滑入到 ControlPanel 右侧）
       const animateSlide = () => {
@@ -385,26 +390,42 @@ function createAppDetailWindow(appData) {
 
 // 关闭当前激活的窗口
 function closeFocusedWindow() {
+  // 首先尝试获取焦点窗口
   const focusedWindow = BrowserWindow.getFocusedWindow();
   
-  if (!focusedWindow) {
-    console.log('No focused window found');
-    return;
+  if (focusedWindow) {
+    console.log('Found focused window');
+    // 检查是哪个窗口
+    if (focusedWindow === appDetailWin) {
+      console.log('Closing app detail window');
+      closeAppDetailWindow();
+      return;
+    } else if (focusedWindow === appListWin) {
+      console.log('Closing app list window');
+      closeAppListWindow();
+      return;
+    } else if (focusedWindow === controlWin) {
+      console.log('Closing control window');
+      controlWin.hide(); // 隐藏控制面板而不是关闭
+      return;
+    }
   }
   
-  // 检查是哪个窗口
-  if (focusedWindow === appDetailWin) {
-    console.log('Closing app detail window');
+  // 如果没有焦点窗口，检查可见窗口（备用方案）
+  console.log('No focused window found, checking visible windows');
+  
+  // 优先级：appDetailWin > appListWin > controlWin
+  if (appDetailWin && !appDetailWin.isDestroyed() && appDetailWin.isVisible()) {
+    console.log('App detail window is visible, closing it');
     closeAppDetailWindow();
-  } else if (focusedWindow === appListWin) {
-    console.log('Closing app list window');
+  } else if (appListWin && !appListWin.isDestroyed() && appListWin.isVisible()) {
+    console.log('App list window is visible, closing it');
     closeAppListWindow();
-  } else if (focusedWindow === controlWin) {
-    console.log('Closing control window');
-    controlWin.hide(); // 隐藏控制面板而不是关闭
+  } else if (controlWin && !controlWin.isDestroyed() && controlWin.isVisible()) {
+    console.log('Control window is visible, hiding it');
+    controlWin.hide();
   } else {
-    console.log('Closing unknown window');
-    focusedWindow.close();
+    console.log('No visible window found to close');
   }
 }
 
