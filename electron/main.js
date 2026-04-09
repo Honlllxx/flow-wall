@@ -69,6 +69,9 @@ function createWallpaperWindow() {
 }
 
 function createControlPanel() {
+  // 从electron-store中获取保存的窗口位置
+  const savedPosition = store.get('windowPositions', {}).controlWin;
+  
   controlWin = new BrowserWindow({
     width: 400,
     height: 600,
@@ -95,6 +98,23 @@ function createControlPanel() {
     controlWin.loadFile(indexPath, { hash: 'control' });
   }
 
+  // 设置窗口位置
+  controlWin.once('ready-to-show', () => {
+    if (savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number') {
+      // 使用保存的位置
+      controlWin.setPosition(savedPosition.x, savedPosition.y);
+      console.log('ControlPanel已恢复到保存位置:', savedPosition);
+    } else {
+      // 没有保存的位置，使用默认位置（屏幕中心）
+      controlWin.center();
+      console.log('ControlPanel使用默认位置（屏幕中心）');
+    }
+    
+    const bounds = controlWin.getBounds();
+    controlWinInitialX = bounds.x;
+    console.log('ControlPanel初始X坐标:', controlWinInitialX);
+  });
+
   // 修改 blur 事件处理：如果详情面板显示，则不隐藏 ControlPanel
   controlWin.on('blur', () => {
     // 检查详情面板是否存在且可见
@@ -105,11 +125,43 @@ function createControlPanel() {
     controlWin.hide();
   });
   
-  // 存储controlWin的初始X坐标
-  controlWin.once('ready-to-show', () => {
-    const bounds = controlWin.getBounds();
-    controlWinInitialX = bounds.x;
-    console.log('ControlPanel初始X坐标:', controlWinInitialX);
+  // 监听窗口位置改变事件，保存位置到electron-store
+  controlWin.on('move', () => {
+    try {
+      const bounds = controlWin.getBounds();
+      const currentPositions = store.get('windowPositions', {});
+      store.set('windowPositions', {
+        ...currentPositions,
+        controlWin: {
+          x: bounds.x,
+          y: bounds.y
+        }
+      });
+      console.log('ControlPanel位置已保存:', { x: bounds.x, y: bounds.y });
+    } catch (error) {
+      console.error('保存ControlPanel位置失败:', error);
+    }
+  });
+  
+  // 监听窗口关闭事件，确保位置被保存
+  controlWin.on('closed', () => {
+    try {
+      if (!controlWin.isDestroyed()) {
+        const bounds = controlWin.getBounds();
+        const currentPositions = store.get('windowPositions', {});
+        store.set('windowPositions', {
+          ...currentPositions,
+          controlWin: {
+            x: bounds.x,
+            y: bounds.y
+          }
+        });
+        console.log('ControlPanel关闭时位置已保存:', { x: bounds.x, y: bounds.y });
+      }
+    } catch (error) {
+      console.error('关闭时保存ControlPanel位置失败:', error);
+    }
+    controlWin = null;
   });
 }
 
@@ -141,8 +193,12 @@ function createAppListWindow() {
   console.log('使用固定尺寸:', windowWidth, 'x', windowHeight);
   console.log('ControlPanel 外部尺寸:', controlBounds.width, 'x', controlBounds.height);
 
+  // 从electron-store中获取保存的窗口位置
+  const savedPosition = store.get('windowPositions', {}).appListWin;
+  
   // 初始位置在 ControlPanel 左边缘（被 ControlPanel 遮挡）
-  const startX = controlBounds.x;
+  const startX = savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number' ? savedPosition.x : controlBounds.x;
+  const startY = savedPosition && typeof savedPosition.y === 'number' ? savedPosition.y : controlBounds.y;
   // 目标位置：紧挨着 ControlPanel 左侧，没有缝隙
   const targetX = controlBounds.x - windowWidth;
 
@@ -150,7 +206,7 @@ function createAppListWindow() {
     width: windowWidth,
     height: windowHeight,
     x: startX,
-    y: controlBounds.y,
+    y: startY,
     frame: false,
     transparent: true,
     show: false,
@@ -205,6 +261,24 @@ function createAppListWindow() {
     }
   });
 
+  // 监听窗口位置改变事件，保存位置到electron-store
+  appListWin.on('move', () => {
+    try {
+      const bounds = appListWin.getBounds();
+      const currentPositions = store.get('windowPositions', {});
+      store.set('windowPositions', {
+        ...currentPositions,
+        appListWin: {
+          x: bounds.x,
+          y: bounds.y
+        }
+      });
+      console.log('AppListWin位置已保存:', { x: bounds.x, y: bounds.y });
+    } catch (error) {
+      console.error('保存AppListWin位置失败:', error);
+    }
+  });
+
   appListWin.on('focus', () => {
     if (controlWin && !controlWin.isDestroyed() && !controlWin.isVisible()) {
       controlWin.show();
@@ -212,6 +286,22 @@ function createAppListWindow() {
   });
 
   appListWin.on('closed', () => {
+    try {
+      if (!appListWin.isDestroyed()) {
+        const bounds = appListWin.getBounds();
+        const currentPositions = store.get('windowPositions', {});
+        store.set('windowPositions', {
+          ...currentPositions,
+          appListWin: {
+            x: bounds.x,
+            y: bounds.y
+          }
+        });
+        console.log('AppListWin关闭时位置已保存:', { x: bounds.x, y: bounds.y });
+      }
+    } catch (error) {
+      console.error('关闭时保存AppListWin位置失败:', error);
+    }
     appListWin = null;
   });
 
@@ -302,14 +392,18 @@ function createAppDetailWindow(appData) {
     //  fallback: 紧挨着 ControlPanel 右侧
     targetX = controlBounds.x + controlBounds.width;
   }
+  // 从electron-store中获取保存的窗口位置
+  const savedPosition = store.get('windowPositions', {}).appDetailWin;
+  
   // 初始位置在屏幕外右侧（用于滑入动画）
-  const startX = targetX + windowWidth;
+  const startX = savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number' ? savedPosition.x : targetX + windowWidth;
+  const startY = savedPosition && typeof savedPosition.y === 'number' ? savedPosition.y : controlBounds.y;
 
   appDetailWin = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
     x: startX,
-    y: controlBounds.y,
+    y: startY,
     frame: false,
     transparent: true,
     show: false,
@@ -368,6 +462,24 @@ function createAppDetailWindow(appData) {
     }
   });
 
+  // 监听窗口位置改变事件，保存位置到electron-store
+  appDetailWin.on('move', () => {
+    try {
+      const bounds = appDetailWin.getBounds();
+      const currentPositions = store.get('windowPositions', {});
+      store.set('windowPositions', {
+        ...currentPositions,
+        appDetailWin: {
+          x: bounds.x,
+          y: bounds.y
+        }
+      });
+      console.log('AppDetailWin位置已保存:', { x: bounds.x, y: bounds.y });
+    } catch (error) {
+      console.error('保存AppDetailWin位置失败:', error);
+    }
+  });
+
   // 当详情面板获得焦点时，确保 ControlPanel 也保持显示
   appDetailWin.on('focus', () => {
     if (controlWin && !controlWin.isDestroyed() && !controlWin.isVisible()) {
@@ -376,6 +488,23 @@ function createAppDetailWindow(appData) {
   });
 
   appDetailWin.on('closed', () => {
+    try {
+      if (!appDetailWin.isDestroyed()) {
+        const bounds = appDetailWin.getBounds();
+        const currentPositions = store.get('windowPositions', {});
+        store.set('windowPositions', {
+          ...currentPositions,
+          appDetailWin: {
+            x: bounds.x,
+            y: bounds.y
+          }
+        });
+        console.log('AppDetailWin关闭时位置已保存:', { x: bounds.x, y: bounds.y });
+      }
+    } catch (error) {
+      console.error('关闭时保存AppDetailWin位置失败:', error);
+    }
+    
     // 通知 ControlPanel 详情面板已关闭
     if (controlWin && !controlWin.isDestroyed()) {
       controlWin.webContents.send('app-detail-closed');
