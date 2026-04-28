@@ -7,6 +7,12 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Electron 打包产物
+release/
+dist/
+build/
+
+
 node_modules
 dist
 dist-ssr
@@ -14,7 +20,7 @@ dist-ssr
 
 # Build and temporary files
 build/
-electron/modules/
+# electron/modules/
 electron_builder_binaries_mirror
 electron_mirror
 native/
@@ -30,3 +36,6 @@ registry
 *.njsproj
 *.sln
 *.sw?
+
+# Trae AI 配置目录
+.trae/
