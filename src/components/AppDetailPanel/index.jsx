@@ -7,7 +7,7 @@ import {
 import {
   Clock, Zap, Timer, Eye, X, LayoutGrid, Clock3,
   TrendingUp, BarChart3, Activity, Download, ChevronLeft,
-  Calendar, Target, Award, Lock
+  Calendar, Target, Award, Lock, Edit, Save, X as XIcon
 } from 'lucide-react';
 import { useWindowInteraction } from '../../hooks/useWindowInteraction';
 
@@ -76,7 +76,7 @@ const Timeline = ({ sessions, isLight }) => {
       {sessions?.map((session, index) => (
         <div key={index} className="flex items-center gap-4">
           <div className={`w-16 text-xs ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
-            {session.time}
+            {session.startTime}
           </div>
           <div className="flex-1 relative">
             <div className={`h-2 rounded-full ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
@@ -107,22 +107,9 @@ const formatDuration = (milliseconds) => {
   return `${minutes}分钟`;
 };
 
-// 生成模拟时间线数据
-const generateTimelineData = () => {
-  const hours = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'];
-  return hours.map(time => ({
-    time,
-    duration: Math.floor(Math.random() * 60) + 10
-  }));
-};
-
-// 生成模拟会话数据
-const generateSessionData = () => [
-  { time: '09:30', duration: '45分钟', percentage: 75 },
-  { time: '11:15', duration: '30分钟', percentage: 50 },
-  { time: '14:00', duration: '60分钟', percentage: 100 },
-  { time: '16:45', duration: '20分钟', percentage: 33 },
-  { time: '19:20', duration: '40分钟', percentage: 67 },
+// 应用分类选项
+const CATEGORIES = [
+  '工作', '娱乐', '学习', '工具', '社交', '游戏', '其他'
 ];
 
 const AppDetailPanel = () => {
@@ -131,44 +118,58 @@ const AppDetailPanel = () => {
   const [isLight, setIsLight] = useState(false);
   const [opacity, setOpacity] = useState(0.6);
   const [appData, setAppData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [isEditingCategory, setIsEditingCategory] = useState(false);
+  const [newCategory, setNewCategory] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   // 从主进程获取应用数据
   useEffect(() => {
     let isMounted = true;
-    let timeoutId = null;
+    
+    const processHourlyData = (hourlyData) => {
+      // 处理每小时使用数据，转换为图表所需格式
+      if (!hourlyData || hourlyData.length !== 24) {
+        return [];
+      }
+      return hourlyData.map((duration, hour) => ({
+        time: `${hour}:00`,
+        duration: Math.round(duration / 60000) // 转换为分钟
+      }));
+    };
+    
+    const processSessionData = (sessions) => {
+      // 处理会话数据，确保格式正确
+      if (!sessions || !Array.isArray(sessions)) {
+        return [];
+      }
+      return sessions.map(session => ({
+        startTime: session.startTime,
+        endTime: session.endTime,
+        duration: session.duration,
+        percentage: session.percentage || 0
+      }));
+    };
     
     const loadData = async () => {
       try {
-        // 设置超时保护，最长1.25秒后自动结束加载状态
-        timeoutId = setTimeout(() => {
-          if (isMounted) {
-            console.warn('AppDetailPanel数据加载超时');
-            setLoading(false);
-          }
-        }, 1250);
-        
         if (window.api?.getAppDetailData) {
           const data = await window.api.getAppDetailData();
           if (isMounted) {
-            setAppData(data);
-            console.log('AppDetailPanel数据加载成功:', data);
+            // 确保数据结构完整并处理数据格式
+            const completeData = {
+              ...data,
+              hourlyData: processHourlyData(data?.hourlyData),
+              sessions: processSessionData(data?.sessions)
+            };
+            setAppData(completeData);
+            setNewCategory(data?.category || '');
+            console.log('AppDetailPanel数据加载成功:', completeData);
           }
         } else {
           console.warn('getAppDetailData API不可用');
         }
       } catch (e) {
         console.error('Failed to load app data:', e);
-        if (isMounted) {
-          setLoading(false);
-        }
-      } finally {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-        }
-        if (isMounted) {
-          setLoading(false);
-        }
       }
     };
     
@@ -177,17 +178,21 @@ const AppDetailPanel = () => {
     // 监听数据更新事件
     const unsubscribe = window.api?.onAppDetailUpdated && window.api.onAppDetailUpdated((appData) => {
       if (isMounted) {
-        setAppData(appData);
-        console.log('AppDetailPanel数据更新:', appData);
+        // 确保数据结构完整并处理数据格式
+        const completeData = {
+          ...appData,
+          hourlyData: processHourlyData(appData?.hourlyData),
+          sessions: processSessionData(appData?.sessions)
+        };
+        setAppData(completeData);
+        setNewCategory(appData?.category || '');
+        console.log('AppDetailPanel数据更新:', completeData);
       }
     });
 
     // 清理函数
     return () => {
       isMounted = false;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
       if (unsubscribe) {
         unsubscribe();
       }
@@ -216,25 +221,39 @@ const AppDetailPanel = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div 
-        className={`h-full flex items-center justify-center backdrop-blur-xl ${isLight ? 'text-gray-900' : 'text-white'}`}
-        style={{
-          backgroundColor: isLight 
-            ? `rgba(255, 255, 255, ${opacity})` 
-            : `rgba(17, 24, 39, ${opacity})`
-        }}
-      >
-        <div className="flex flex-col items-center gap-2">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
-          <span className={isLight ? 'text-gray-600' : 'text-gray-400'}>
-            加载中...
-          </span>
-        </div>
-      </div>
-    );
-  }
+  const handleSaveCategory = async () => {
+    if (!appData || !newCategory) return;
+    
+    try {
+      setIsLoading(true);
+      if (window.api?.appUsage?.setCategory) {
+        await window.api.appUsage.setCategory(appData.appName, newCategory);
+        // 更新本地数据
+        setAppData({ ...appData, category: newCategory });
+        setIsEditingCategory(false);
+        console.log('应用分类更新成功:', newCategory);
+      }
+    } catch (e) {
+      console.error('更新应用分类失败:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleExportData = async () => {
+    try {
+      setIsLoading(true);
+      if (window.api?.exportData) {
+        const result = await window.api.exportData();
+        console.log('数据导出成功:', result);
+        // 可以添加导出成功提示
+      }
+    } catch (e) {
+      console.error('数据导出失败:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   if (!appData) {
     return (
@@ -331,9 +350,44 @@ const AppDetailPanel = () => {
             <div>
               <h2 className="text-2xl font-bold text-white">{appData.appName}</h2>
               <div className="flex items-center gap-2 mt-1">
-                <span className="px-3 py-1 rounded-full bg-white/20 text-white text-xs">
-                  {appData.category}
-                </span>
+                {isEditingCategory ? (
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={newCategory}
+                      onChange={(e) => setNewCategory(e.target.value)}
+                      className="px-2 py-1 rounded-full bg-white/90 text-blue-600 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-white"
+                    >
+                      {CATEGORIES.map(category => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleSaveCategory}
+                      disabled={isLoading}
+                      className="p-1 rounded-full bg-white/80 hover:bg-white text-blue-600 transition-colors"
+                    >
+                      <Save size={14} />
+                    </button>
+                    <button
+                      onClick={() => setIsEditingCategory(false)}
+                      className="p-1 rounded-full bg-white/80 hover:bg-white text-blue-600 transition-colors"
+                    >
+                      <XIcon size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 rounded-full bg-white/20 text-white text-xs">
+                      {appData.category}
+                    </span>
+                    <button
+                      onClick={() => setIsEditingCategory(true)}
+                      className="p-1 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors"
+                    >
+                      <Edit size={14} />
+                    </button>
+                  </div>
+                )}
                 <span className="text-white/60 text-xs">
                   排名 #{appData.rank || 1} / {appData.totalApps || 1}
                 </span>
@@ -394,7 +448,7 @@ const AppDetailPanel = () => {
               </div>
               <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={generateTimelineData()}>
+                  <AreaChart data={appData.hourlyData || []}>
                     <defs>
                       <linearGradient id="colorDuration" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#60A5FA" stopOpacity={0.3}/>
@@ -432,7 +486,13 @@ const AppDetailPanel = () => {
                 <Clock3 size={16} />
                 今日会话
               </h3>
-              <Timeline sessions={generateSessionData()} isLight={isLight} />
+              {appData.sessions && appData.sessions.length > 0 ? (
+                <Timeline sessions={appData.sessions} isLight={isLight} />
+              ) : (
+                <div className={`flex items-center justify-center h-20 text-xs ${isLight ? 'text-gray-400' : 'text-gray-500'}`}>
+                  今日暂无会话数据
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -446,7 +506,7 @@ const AppDetailPanel = () => {
               </h3>
               <div className="h-56">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={generateTimelineData()}>
+                  <LineChart data={appData.hourlyData || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke={isLight ? '#e5e7eb' : 'rgba(255,255,255,0.1)'} />
                     <XAxis dataKey="time" stroke={subTextColor} tick={{ fontSize: 10 }} />
                     <YAxis stroke={subTextColor} tick={{ fontSize: 10 }} />
@@ -479,7 +539,7 @@ const AppDetailPanel = () => {
                   峰值使用时段
                 </h4>
                 <div className={`text-xl font-bold ${isLight ? 'text-gray-900' : 'text-white'}`}>
-                  14:00 - 16:00
+                  {appData.peakHour ? `${appData.peakHour}:00 - ${appData.peakHour + 1}:00` : '14:00 - 16:00'}
                 </div>
                 <p className={`text-xs mt-1 ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
                   这段时间使用最为频繁
@@ -491,10 +551,10 @@ const AppDetailPanel = () => {
                   最长连续使用
                 </h4>
                 <div className={`text-xl font-bold ${isLight ? 'text-gray-900' : 'text-white'}`}>
-                  2小时15分
+                  {appData.longestSession ? formatDuration(appData.longestSession) : '2小时15分'}
                 </div>
                 <p className={`text-xs mt-1 ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
-                  上午10:00开始
+                  {appData.longestSessionStart ? `从 ${appData.longestSessionStart} 开始` : '上午10:00开始'}
                 </p>
               </div>
             </div>
@@ -534,7 +594,7 @@ const AppDetailPanel = () => {
                       专注度分析
                     </h4>
                     <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
-                      平均会话时长 <span className="font-semibold text-blue-500">45分钟</span>，
+                      平均会话时长 <span className="font-semibold text-blue-500">{appData.sessionCount > 0 ? formatDuration(appData.totalDuration / appData.sessionCount) : '45分钟'}</span>，
                       表明您在使用此应用时较为专注。
                     </p>
                   </div>
@@ -549,7 +609,7 @@ const AppDetailPanel = () => {
                       效率建议
                     </h4>
                     <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
-                      建议在 <span className="font-semibold text-yellow-500">14:00-16:00</span> 期间
+                      建议在 <span className="font-semibold text-yellow-500">{appData.peakHour ? `${appData.peakHour}:00-${appData.peakHour + 1}:00` : '14:00-16:00'}</span> 期间
                       集中处理相关任务，这是您使用此应用效率最高的时段。
                     </p>
                   </div>
@@ -558,9 +618,13 @@ const AppDetailPanel = () => {
             </div>
 
             {/* 导出按钮 */}
-            <button className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${isLight ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+            <button 
+              onClick={handleExportData}
+              disabled={isLoading}
+              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${isLight ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-white/10 hover:bg-white/20 text-white'}`}
+            >
               <Download size={16} />
-              <span className="text-sm font-medium">导出详细数据</span>
+              <span className="text-sm font-medium">{isLoading ? '导出中...' : '导出详细数据'}</span>
             </button>
           </div>
         )}

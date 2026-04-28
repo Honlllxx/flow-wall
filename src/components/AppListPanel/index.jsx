@@ -65,10 +65,7 @@ const AppListPanel = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedApp, setSelectedApp] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'grid'
-  const [isOpeningDetail, setIsOpeningDetail] = useState(false); // 添加详情面板打开状态
-  const [hasFirstOpenedDetail, setHasFirstOpenedDetail] = useState(false); // 是否首次打开详情面板
   const categoryScrollRef = useRef(null);
   const selectAppTimeoutRef = useRef(null); // 防抖定时器引用
 
@@ -102,8 +99,6 @@ const AppListPanel = () => {
         }
       } catch (e) {
         console.error('Failed to load app usage data:', e);
-      } finally {
-        setLoading(false);
       }
     };
     loadData();
@@ -176,32 +171,12 @@ const AppListPanel = () => {
     
     // 设置防抖延迟（250ms）
     selectAppTimeoutRef.current = setTimeout(() => {
-      // 仅在首次打开时显示加载状态
-      const isFirstOpen = !hasFirstOpenedDetail;
-      if (isFirstOpen) {
-        setIsOpeningDetail(true);
-        setHasFirstOpenedDetail(true);
-      }
-      
       if (window.api?.appListSelect) {
         window.api.appListSelect({
           ...app,
           rank: todayStats.findIndex(a => a.appName === app.appName) + 1,
           totalApps: todayStats.length
         });
-      }
-      
-      // 如果是首次打开，设置超时重置加载状态
-      if (isFirstOpen) {
-        // 设置超时保护，最长750ms后自动隐藏加载状态
-        setTimeout(() => {
-          setIsOpeningDetail(false);
-        }, 750);
-        
-        // 正常情况下，250ms后隐藏加载状态
-        setTimeout(() => {
-          setIsOpeningDetail(false);
-        }, 250);
       }
     }, 250);
   };
@@ -255,17 +230,7 @@ const AppListPanel = () => {
       : `rgba(17, 24, 39, ${opacity})`
   };
 
-  if (loading) {
-    return (
-      <div
-        className={`h-full flex items-center justify-center backdrop-blur-xl ${isLight ? 'text-gray-900' : 'text-white'}`}
-        style={bgStyle}
-      >
-        <RefreshCw className="animate-spin text-blue-400 mr-2" size={24} />
-        <span className={isLight ? 'text-gray-600' : 'text-gray-400'}>加载中...</span>
-      </div>
-    );
-  }
+
 
   return (
     <div
@@ -422,14 +387,6 @@ const AppListPanel = () => {
 
       {/* 应用列表 */}
       <div className="flex-1 overflow-y-auto px-3 pb-3 custom-scrollbar">
-        {isOpeningDetail && (
-          <div className={`absolute inset-0 z-10 flex items-center justify-center backdrop-blur-sm ${isLight ? 'bg-white/50' : 'bg-gray-900/50'}`}>
-            <div className="flex flex-col items-center gap-2">
-              <RefreshCw className="animate-spin text-blue-500" size={24} />
-              <span className={`text-sm ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>加载中...</span>
-            </div>
-          </div>
-        )}
         {filteredApps.length > 0 ? (
           <div className="space-y-2">
             {filteredApps.map((app, index) => (
@@ -437,7 +394,6 @@ const AppListPanel = () => {
                 key={app.appName}
                 onClick={() => handleSelectApp(app)}
                 className={`flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer group ${
-                  isOpeningDetail ? 'opacity-50 cursor-not-allowed' : '',
                   selectedApp?.appName === app.appName
                     ? isLight ? 'bg-blue-50 border-blue-200' : 'bg-blue-500/20 border-blue-500/30'
                     : isLight ? 'bg-white border-transparent hover:border-gray-200' : 'bg-white/5 border-transparent hover:bg-white/10'
