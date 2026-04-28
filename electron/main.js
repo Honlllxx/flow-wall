@@ -69,12 +69,40 @@ function createWallpaperWindow() {
 }
 
 function createControlPanel() {
-  // 从electron-store中获取保存的窗口位置
-  const savedPosition = store.get('windowPositions', {}).controlWin;
+  // 加载保存的窗口位置
+  const windowPositions = loadWindowPositions();
+  const controlPosition = windowPositions.controlWin || {};
+  
+  // 计算默认位置（屏幕中心）
+  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+  const defaultX = Math.floor((screenWidth - 400) / 2);
+  const defaultY = Math.floor((screenHeight - 600) / 2);
+  
+  // 检查位置数据的有效性
+  let finalX = defaultX;
+  let finalY = defaultY;
+  
+  if (controlPosition.x !== undefined && controlPosition.y !== undefined) {
+    // 确保位置在屏幕范围内
+    const minX = 0;
+    const minY = 0;
+    const maxX = screenWidth - 400;
+    const maxY = screenHeight - 600;
+    
+    finalX = Math.max(minX, Math.min(maxX, controlPosition.x));
+    finalY = Math.max(minY, Math.min(maxY, controlPosition.y));
+    
+    // 如果位置被修正，记录日志
+    if (finalX !== controlPosition.x || finalY !== controlPosition.y) {
+      console.log('窗口位置修正:', { original: controlPosition, corrected: { x: finalX, y: finalY } });
+    }
+  }
   
   controlWin = new BrowserWindow({
     width: 400,
     height: 600,
+    x: finalX,
+    y: finalY,
     frame: false,
     transparent: true,
     show: false,
@@ -98,23 +126,6 @@ function createControlPanel() {
     controlWin.loadFile(indexPath, { hash: 'control' });
   }
 
-  // 设置窗口位置
-  controlWin.once('ready-to-show', () => {
-    if (savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number') {
-      // 使用保存的位置
-      controlWin.setPosition(savedPosition.x, savedPosition.y);
-      console.log('ControlPanel已恢复到保存位置:', savedPosition);
-    } else {
-      // 没有保存的位置，使用默认位置（屏幕中心）
-      controlWin.center();
-      console.log('ControlPanel使用默认位置（屏幕中心）');
-    }
-    
-    const bounds = controlWin.getBounds();
-    controlWinInitialX = bounds.x;
-    console.log('ControlPanel初始X坐标:', controlWinInitialX);
-  });
-
   // 修改 blur 事件处理：如果详情面板显示，则不隐藏 ControlPanel
   controlWin.on('blur', () => {
     // 检查详情面板是否存在且可见
@@ -125,45 +136,18 @@ function createControlPanel() {
     controlWin.hide();
   });
   
-  // 监听窗口位置改变事件，保存位置到electron-store
+  // 存储controlWin的初始X坐标
+  controlWin.once('ready-to-show', () => {
+    const bounds = controlWin.getBounds();
+    controlWinInitialX = bounds.x;
+    console.log('ControlPanel初始X坐标:', controlWinInitialX);
+  });
+
+  // 为controlWin添加move事件监听器，用于检测吸附
   controlWin.on('move', () => {
-    try {
-      const bounds = controlWin.getBounds();
-      const currentPositions = store.get('windowPositions', {});
-      store.set('windowPositions', {
-        ...currentPositions,
-        controlWin: {
-          x: bounds.x,
-          y: bounds.y
-        }
-      });
-      console.log('ControlPanel位置已保存:', { x: bounds.x, y: bounds.y });
-    } catch (error) {
-      console.error('保存ControlPanel位置失败:', error);
-    }
+    handleWindowMove(controlWin);
   });
-  
-  // 监听窗口关闭事件，确保位置被保存
-  controlWin.on('closed', () => {
-    try {
-      if (!controlWin.isDestroyed()) {
-        const bounds = controlWin.getBounds();
-        const currentPositions = store.get('windowPositions', {});
-        store.set('windowPositions', {
-          ...currentPositions,
-          controlWin: {
-            x: bounds.x,
-            y: bounds.y
-          }
-        });
-        console.log('ControlPanel关闭时位置已保存:', { x: bounds.x, y: bounds.y });
-      }
-    } catch (error) {
-      console.error('关闭时保存ControlPanel位置失败:', error);
-    }
-    controlWin = null;
-  });
-}
+}  
 
 // 创建应用列表窗口
 function createAppListWindow() {
@@ -193,12 +177,8 @@ function createAppListWindow() {
   console.log('使用固定尺寸:', windowWidth, 'x', windowHeight);
   console.log('ControlPanel 外部尺寸:', controlBounds.width, 'x', controlBounds.height);
 
-  // 从electron-store中获取保存的窗口位置
-  const savedPosition = store.get('windowPositions', {}).appListWin;
-  
   // 初始位置在 ControlPanel 左边缘（被 ControlPanel 遮挡）
-  const startX = savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number' ? savedPosition.x : controlBounds.x;
-  const startY = savedPosition && typeof savedPosition.y === 'number' ? savedPosition.y : controlBounds.y;
+  const startX = controlBounds.x;
   // 目标位置：紧挨着 ControlPanel 左侧，没有缝隙
   const targetX = controlBounds.x - windowWidth;
 
@@ -206,7 +186,7 @@ function createAppListWindow() {
     width: windowWidth,
     height: windowHeight,
     x: startX,
-    y: startY,
+    y: controlBounds.y,
     frame: false,
     transparent: true,
     show: false,
@@ -232,50 +212,10 @@ function createAppListWindow() {
 
   appListWin.once('ready-to-show', () => {
     if (appListWin && !appListWin.isDestroyed()) {
+      // 直接设置到目标位置并显示
+      appListWin.setPosition(targetX, controlBounds.y);
       appListWin.show();
-      appListWin.focus(); // 确保窗口获得焦点
-      
-      // 执行从右向左的滑出动画（从 ControlPanel 边缘滑出到左侧）
-      const animateSlide = () => {
-        if (!appListWin || appListWin.isDestroyed()) return;
-        
-        const currentBounds = appListWin.getBounds();
-        const step = 20; // 每次移动的距离
-        
-        if (currentBounds.x > targetX) {
-          const newX = Math.max(currentBounds.x - step, targetX);
-          appListWin.setPosition(newX, currentBounds.y);
-          
-          if (newX > targetX) {
-            setTimeout(animateSlide, 16); // ~60fps
-          } else {
-            console.log('应用列表窗口滑动动画完成');
-          }
-        }
-      };
-      
-      // 开始动画
-      setTimeout(animateSlide, 16);
-    } else {
-      // 窗口销毁
-    }
-  });
-
-  // 监听窗口位置改变事件，保存位置到electron-store
-  appListWin.on('move', () => {
-    try {
-      const bounds = appListWin.getBounds();
-      const currentPositions = store.get('windowPositions', {});
-      store.set('windowPositions', {
-        ...currentPositions,
-        appListWin: {
-          x: bounds.x,
-          y: bounds.y
-        }
-      });
-      console.log('AppListWin位置已保存:', { x: bounds.x, y: bounds.y });
-    } catch (error) {
-      console.error('保存AppListWin位置失败:', error);
+      appListWin.focus();
     }
   });
 
@@ -285,72 +225,32 @@ function createAppListWindow() {
     }
   });
 
-  appListWin.on('closed', () => {
-    try {
-      if (!appListWin.isDestroyed()) {
-        const bounds = appListWin.getBounds();
-        const currentPositions = store.get('windowPositions', {});
-        store.set('windowPositions', {
-          ...currentPositions,
-          appListWin: {
-            x: bounds.x,
-            y: bounds.y
-          }
-        });
-        console.log('AppListWin关闭时位置已保存:', { x: bounds.x, y: bounds.y });
+  appListWin.on('blur', () => {
+    // 延迟检查，确保焦点已经转移
+    setTimeout(() => {
+      // 检查是否有其他面板窗口获得焦点
+      const focusedWindow = BrowserWindow.getFocusedWindow();
+      if (!focusedWindow || (focusedWindow !== appDetailWin && focusedWindow !== controlWin)) {
+        // 如果焦点不在其他面板窗口上，则关闭应用列表面板
+        closeAppListWindow();
       }
-    } catch (error) {
-      console.error('关闭时保存AppListWin位置失败:', error);
-    }
+    }, 100);
+  });
+
+  appListWin.on('closed', () => {
     appListWin = null;
+  });
+
+  // 为appListWin添加move事件监听器，用于检测吸附
+  appListWin.on('move', () => {
+    handleWindowMove(appListWin);
   });
 
   return appListWin;
 }
 
 // 关闭应用列表窗口（带滑出动画）
-function closeAppListWindow() {
-  console.log('关闭应用列表窗口');
-  if (appListWin && !appListWin.isDestroyed()) {
-    const controlBounds = controlWin.getBounds();
-    // 滑动到 ControlPanel 左边缘（被遮挡）
-    const endX = controlBounds.x;
-    
-    const animateSlideOut = () => {
-      if (!appListWin || appListWin.isDestroyed()) return;
-      
-      const bounds = appListWin.getBounds();
-      const step = 25; // 关闭时更快
-      
-      if (bounds.x < endX) {
-        const newX = Math.min(bounds.x + step, endX);
-        appListWin.setPosition(newX, bounds.y);
-        
-        if (newX < endX) {
-          setTimeout(animateSlideOut, 16);
-        } else {
-          appListWin.close();
-          appListWin = null;
-          // 恢复controlWin到初始位置
-          if (controlWin && !controlWin.isDestroyed() && controlWinInitialX !== null) {
-            console.log('恢复controlWin到初始位置:', controlWinInitialX);
-            controlWin.setPosition(controlWinInitialX, controlBounds.y);
-          }
-        }
-      } else {
-        appListWin.close();
-        appListWin = null;
-        // 恢复controlWin到初始位置
-        if (controlWin && !controlWin.isDestroyed() && controlWinInitialX !== null) {
-          console.log('恢复controlWin到初始位置:', controlWinInitialX);
-          controlWin.setPosition(controlWinInitialX, controlBounds.y);
-        }
-      }
-    };
-    
-    setTimeout(animateSlideOut, 16);
-  }
-}
+// 注意：统一使用下面的closeAppListWindow函数实现
 
 // 创建应用详情面板窗口
 function createAppDetailWindow(appData) {
@@ -392,18 +292,14 @@ function createAppDetailWindow(appData) {
     //  fallback: 紧挨着 ControlPanel 右侧
     targetX = controlBounds.x + controlBounds.width;
   }
-  // 从electron-store中获取保存的窗口位置
-  const savedPosition = store.get('windowPositions', {}).appDetailWin;
-  
   // 初始位置在屏幕外右侧（用于滑入动画）
-  const startX = savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number' ? savedPosition.x : targetX + windowWidth;
-  const startY = savedPosition && typeof savedPosition.y === 'number' ? savedPosition.y : controlBounds.y;
+  const startX = targetX + windowWidth;
 
   appDetailWin = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
     x: startX,
-    y: startY,
+    y: controlBounds.y,
     frame: false,
     transparent: true,
     show: false,
@@ -431,52 +327,11 @@ function createAppDetailWindow(appData) {
   }
 
   appDetailWin.once('ready-to-show', () => {
-    console.log('应用详情窗口 ready-to-show');
     if (appDetailWin && !appDetailWin.isDestroyed()) {
+      // 直接设置到目标位置并显示
+      appDetailWin.setPosition(targetX, controlBounds.y);
       appDetailWin.show();
-      appDetailWin.focus(); // 确保窗口获得焦点
-      
-      // 执行从右向左的滑入动画（从屏幕外右侧滑入到 ControlPanel 右侧）
-      const animateSlide = () => {
-        if (!appDetailWin || appDetailWin.isDestroyed()) return;
-        
-        const currentBounds = appDetailWin.getBounds();
-        const step = 20; // 每次移动的距离
-        
-        if (currentBounds.x > targetX) {
-          const newX = Math.max(currentBounds.x - step, targetX);
-          appDetailWin.setPosition(newX, currentBounds.y);
-          
-          if (newX > targetX) {
-            setTimeout(animateSlide, 16);
-          } else {
-            console.log('应用详情窗口滑动动画完成');
-          }
-        }
-      };
-      
-      // 开始动画
-      setTimeout(animateSlide, 16);
-    } else {
-      console.error('应用详情窗口已销毁，无法显示');
-    }
-  });
-
-  // 监听窗口位置改变事件，保存位置到electron-store
-  appDetailWin.on('move', () => {
-    try {
-      const bounds = appDetailWin.getBounds();
-      const currentPositions = store.get('windowPositions', {});
-      store.set('windowPositions', {
-        ...currentPositions,
-        appDetailWin: {
-          x: bounds.x,
-          y: bounds.y
-        }
-      });
-      console.log('AppDetailWin位置已保存:', { x: bounds.x, y: bounds.y });
-    } catch (error) {
-      console.error('保存AppDetailWin位置失败:', error);
+      appDetailWin.focus();
     }
   });
 
@@ -487,24 +342,19 @@ function createAppDetailWindow(appData) {
     }
   });
 
-  appDetailWin.on('closed', () => {
-    try {
-      if (!appDetailWin.isDestroyed()) {
-        const bounds = appDetailWin.getBounds();
-        const currentPositions = store.get('windowPositions', {});
-        store.set('windowPositions', {
-          ...currentPositions,
-          appDetailWin: {
-            x: bounds.x,
-            y: bounds.y
-          }
-        });
-        console.log('AppDetailWin关闭时位置已保存:', { x: bounds.x, y: bounds.y });
+  appDetailWin.on('blur', () => {
+    // 延迟检查，确保焦点已经转移
+    setTimeout(() => {
+      // 检查是否有其他面板窗口获得焦点
+      const focusedWindow = BrowserWindow.getFocusedWindow();
+      if (!focusedWindow || (focusedWindow !== appListWin && focusedWindow !== controlWin)) {
+        // 如果焦点不在其他面板窗口上，则关闭应用详情面板
+        closeAppDetailWindow();
       }
-    } catch (error) {
-      console.error('关闭时保存AppDetailWin位置失败:', error);
-    }
-    
+    }, 100);
+  });
+
+  appDetailWin.on('closed', () => {
     // 通知 ControlPanel 详情面板已关闭
     if (controlWin && !controlWin.isDestroyed()) {
       controlWin.webContents.send('app-detail-closed');
@@ -512,6 +362,11 @@ function createAppDetailWindow(appData) {
     if (appDetailWin) {
       appDetailWin = null;
     }
+  });
+
+  // 为appDetailWin添加move事件监听器，用于检测吸附
+  appDetailWin.on('move', () => {
+    handleWindowMove(appDetailWin);
   });
 
   return appDetailWin;
@@ -561,105 +416,43 @@ function closeFocusedWindow() {
 // 关闭应用列表面板窗口
 function closeAppListWindow() {
   if (appListWin && !appListWin.isDestroyed()) {
-    console.log('关闭应用列表面板窗口');
+    // 保存窗口2的位置
+    const appListBounds = appListWin.getBounds();
+    const appListX = appListBounds.x;
+    const appListY = appListBounds.y;
+    const windowWidth = 400; // 固定窗口宽度
     
-    // 执行关闭动画
-    const bounds = appListWin.getBounds();
-    const windowWidth = 400; // 使用固定尺寸
-    // 向左滑出到屏幕外
-    const endX = -windowWidth;
+    appListWin.close();
+    appListWin = null;
     
-    // 动画配置
-    const duration = 400; // 400ms动画
-    const frameDuration = 16; // ~60fps
-    const totalFrames = duration / frameDuration;
-    let currentFrame = 0;
-    
-    const animateSlideOut = () => {
-      if (!appListWin || appListWin.isDestroyed()) return;
+    // 检查是否存在窗口1（control）和窗口3（appDetail）
+    if (controlWin && !controlWin.isDestroyed() && appDetailWin && !appDetailWin.isDestroyed()) {
+      const controlBounds = controlWin.getBounds();
+      const appDetailBounds = appDetailWin.getBounds();
       
-      if (currentFrame >= totalFrames) {
-        appListWin.close();
-        appListWin = null;
-        console.log('应用列表面板窗口已关闭');
-        return;
+      // 检查窗口排列顺序：窗口1（control） < 窗口2（appList） < 窗口3（appDetail）
+      if (controlBounds.x < appListX && appListX < appDetailBounds.x) {
+        // 将窗口1移动到窗口2的位置
+        controlWin.setPosition(appListX, appListY);
+        
+        // 将窗口3向左移动一个窗口宽度，保持布局连贯
+        const appDetailTargetX = appDetailBounds.x - windowWidth;
+        appDetailWin.setPosition(appDetailTargetX, appDetailBounds.y);
       }
-      
-      // 计算当前帧的位置和透明度（使用ease-in-out缓动）
-      const progress = currentFrame / totalFrames;
-      const easedProgress = easeInOutQuad(progress);
-      
-      const currentX = bounds.x - (bounds.x - endX) * easedProgress;
-      const opacity = 1 - progress;
-      
-      // 更新位置和透明度
-      appListWin.setPosition(Math.round(currentX), bounds.y);
-      appListWin.setOpacity(opacity);
-      
-      currentFrame++;
-      setTimeout(animateSlideOut, frameDuration);
-    };
-    
-    // 开始动画
-    animateSlideOut();
-  } else {
-    console.log('应用列表面板窗口已不存在或已销毁');
+    }
+    // 移除当只有control面板存在时的位置移动逻辑
   }
 }
 
-// 关闭应用详情面板窗口（带滑出动画）
+// 关闭应用详情面板窗口
 function closeAppDetailWindow() {
-  console.log('关闭应用详情窗口');
   if (appDetailWin && !appDetailWin.isDestroyed()) {
-    const bounds = appDetailWin.getBounds();
-    const windowWidth = 400; // 使用固定尺寸
-    // 向左滑出到屏幕外
-    const endX = -windowWidth;
+    appDetailWin.close();
+    appDetailWin = null;
     
-    // 动画配置
-    const duration = 400; // 400ms动画
-    const frameDuration = 16; // ~60fps
-    const totalFrames = duration / frameDuration;
-    let currentFrame = 0;
-    
-    const animateSlideOut = () => {
-      if (!appDetailWin || appDetailWin.isDestroyed()) return;
-      
-      if (currentFrame >= totalFrames) {
-        appDetailWin.close();
-        appDetailWin = null;
-        console.log('应用详情窗口已关闭');
-        
-        // 重置创建状态
-        isCreatingAppDetail = false;
-        
-        // 关闭后检查并执行位置交换逻辑
-        setTimeout(() => {
-          handlePanelPositionAfterClose();
-        }, 50);
-        
-        return;
-      }
-      
-      // 计算当前帧的位置和透明度（使用ease-in-out缓动）
-      const progress = currentFrame / totalFrames;
-      const easedProgress = easeInOutQuad(progress);
-      
-      const currentX = bounds.x - (bounds.x - endX) * easedProgress;
-      const opacity = 1 - progress;
-      
-      // 更新位置和透明度
-      appDetailWin.setPosition(Math.round(currentX), bounds.y);
-      appDetailWin.setOpacity(opacity);
-      
-      currentFrame++;
-      setTimeout(animateSlideOut, frameDuration);
-    };
-    
-    setTimeout(animateSlideOut, 16);
-  } else {
-    console.log('应用详情窗口已不存在或已销毁');
     // 关闭后检查并执行位置交换逻辑
+    handlePanelPositionAfterClose();
+  } else {
     handlePanelPositionAfterClose();
   }
 }
@@ -702,84 +495,25 @@ function handlePanelPositionAfterClose() {
   }
 }
 
-// 执行面板位置交换动画
+// 执行面板位置交换（无动画）
 function animatePanelSwap(controlTargetX, appListTargetX) {
-  console.log('执行面板位置交换动画');
-  
   if (!controlWin || controlWin.isDestroyed() || !appListWin || appListWin.isDestroyed()) {
-    console.error('窗口不存在，无法执行位置交换');
     return;
   }
-  
-  // 禁用交互，显示提示
-  notifyAllWindowsInteractionLocked(true, '正在调整窗口位置，请稍候...');
   
   const controlBounds = controlWin.getBounds();
   const appListBounds = appListWin.getBounds();
   
-  // 动画配置
-  const duration = 400; // 400ms动画
-  const frameDuration = 16; // ~60fps
-  const totalFrames = duration / frameDuration;
-  let currentFrame = 0;
-  
-  // 初始位置
-  const controlStartX = controlBounds.x;
-  const appListStartX = appListBounds.x;
-  
-  // 执行动画
-  const animate = () => {
-    if (currentFrame >= totalFrames || !controlWin || controlWin.isDestroyed() || !appListWin || appListWin.isDestroyed()) {
-      // 动画结束，确保最终位置正确
-      if (controlWin && !controlWin.isDestroyed()) {
-        controlWin.setPosition(controlTargetX, controlBounds.y);
-      }
-      if (appListWin && !appListWin.isDestroyed()) {
-        appListWin.setPosition(appListTargetX, appListBounds.y);
-      }
-      
-      console.log('面板位置交换动画完成');
-      
-      // 恢复交互
-      notifyAllWindowsInteractionLocked(false, '');
-      
-      return;
-    }
-    
-    // 计算当前帧的位置（使用ease-in-out缓动）
-    const progress = currentFrame / totalFrames;
-    const easedProgress = easeInOutQuad(progress);
-    
-    const controlCurrentX = controlStartX + (controlTargetX - controlStartX) * easedProgress;
-    const appListCurrentX = appListStartX + (appListTargetX - appListStartX) * easedProgress;
-    
-    // 更新位置
-    if (controlWin && !controlWin.isDestroyed()) {
-      controlWin.setPosition(Math.round(controlCurrentX), controlBounds.y);
-    }
-    if (appListWin && !appListWin.isDestroyed()) {
-      appListWin.setPosition(Math.round(appListCurrentX), appListBounds.y);
-    }
-    
-    currentFrame++;
-    setTimeout(animate, frameDuration);
-  };
-  
-  // 开始动画
-  animate();
+  // 直接设置位置
+  controlWin.setPosition(controlTargetX, controlBounds.y);
+  appListWin.setPosition(appListTargetX, appListBounds.y);
 }
 
-// 恢复面板到原始位置
+// 恢复面板到原始位置（无动画）
 function restorePanelPositions() {
-  console.log('恢复面板到原始位置');
-  
   if (!controlWin || controlWin.isDestroyed() || !appListWin || appListWin.isDestroyed()) {
-    console.error('窗口不存在，无法恢复位置');
     return;
   }
-  
-  // 禁用交互，显示提示
-  notifyAllWindowsInteractionLocked(true, '正在调整窗口位置，请稍候...');
   
   const controlBounds = controlWin.getBounds();
   const appListBounds = appListWin.getBounds();
@@ -790,53 +524,12 @@ function restorePanelPositions() {
   const controlOriginalX = controlWinInitialX !== null ? controlWinInitialX : controlBounds.x + windowWidth;
   const appListOriginalX = controlBounds.x - windowWidth;
   
-  // 动画配置
-  const duration = 400; // 400ms动画
-  const frameDuration = 16; // ~60fps
-  const totalFrames = duration / frameDuration;
-  let currentFrame = 0;
+  // 直接设置位置
+  controlWin.setPosition(controlOriginalX, controlBounds.y);
+  appListWin.setPosition(appListOriginalX, appListBounds.y);
   
-  // 执行动画
-  const animate = () => {
-    if (currentFrame >= totalFrames || !controlWin || controlWin.isDestroyed() || !appListWin || appListWin.isDestroyed()) {
-      // 动画结束，确保最终位置正确
-      if (controlWin && !controlWin.isDestroyed()) {
-        controlWin.setPosition(controlOriginalX, controlBounds.y);
-      }
-      if (appListWin && !appListWin.isDestroyed()) {
-        appListWin.setPosition(appListOriginalX, appListBounds.y);
-      }
-      
-      // 恢复交互
-      notifyAllWindowsInteractionLocked(false, '');
-      
-      // 重置动画标志，允许下次重新执行动画
-      hasPerformedSwapAnimation = false;
-      console.log('面板位置恢复完成，动画标志已重置');
-      return;
-    }
-    
-    // 计算当前帧的位置（使用ease-in-out缓动）
-    const progress = currentFrame / totalFrames;
-    const easedProgress = easeInOutQuad(progress);
-    
-    const controlCurrentX = controlBounds.x + (controlOriginalX - controlBounds.x) * easedProgress;
-    const appListCurrentX = appListBounds.x + (appListOriginalX - appListBounds.x) * easedProgress;
-    
-    // 更新位置
-    if (controlWin && !controlWin.isDestroyed()) {
-      controlWin.setPosition(Math.round(controlCurrentX), controlBounds.y);
-    }
-    if (appListWin && !appListWin.isDestroyed()) {
-      appListWin.setPosition(Math.round(appListCurrentX), appListBounds.y);
-    }
-    
-    currentFrame++;
-    setTimeout(animate, frameDuration);
-  };
-  
-  // 开始动画
-  animate();
+  // 重置动画标志，允许下次重新执行动画
+  hasPerformedSwapAnimation = false;
 }
 
 app.whenReady().then(() => {
@@ -862,6 +555,15 @@ app.whenReady().then(() => {
   globalShortcut.register('Alt+D', () => {
     if (controlWin && !controlWin.isDestroyed()) {
       if (controlWin.isVisible()) {
+        // 先关闭应用详情面板
+        if (appDetailWin && !appDetailWin.isDestroyed()) {
+          closeAppDetailWindow();
+        }
+        // 再关闭应用列表面板
+        if (appListWin && !appListWin.isDestroyed()) {
+          closeAppListWindow();
+        }
+        // 最后隐藏控制面板
         controlWin.hide();
       } else {
         controlWin.center();
@@ -893,7 +595,166 @@ app.whenReady().then(() => {
   }
 });
 
+// 获取吸附灵敏度（像素），从electron-store中读取，默认为10
+function getSnapThreshold() {
+  try {
+    return store.get('snapThreshold', 10);
+  } catch (error) {
+    console.error('读取吸附灵敏度失败:', error);
+    return 10;
+  }
+}
+
+// 节流函数
+function throttle(func, delay) {
+  let inProgress = false;
+  return function(...args) {
+    if (!inProgress) {
+      inProgress = true;
+      func.apply(this, args);
+      setTimeout(() => {
+        inProgress = false;
+      }, delay);
+    }
+  };
+}
+
+// 处理窗口移动事件，实现吸附功能
+const handleWindowMove = throttle(function(window) {
+  if (!window || window.isDestroyed()) return;
+  
+  const bounds = window.getBounds();
+  let newX = bounds.x;
+  let newY = bounds.y;
+  
+  // 获取吸附灵敏度
+  const snapThreshold = getSnapThreshold();
+  
+  // 检测屏幕边界吸附
+  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+  
+  // 左边界吸附
+  if (Math.abs(bounds.x) < snapThreshold) {
+    newX = 0;
+  }
+  
+  // 右边界吸附
+  if (Math.abs(screenWidth - (bounds.x + bounds.width)) < snapThreshold) {
+    newX = screenWidth - bounds.width;
+  }
+  
+  // 上边界吸附
+  if (Math.abs(bounds.y) < snapThreshold) {
+    newY = 0;
+  }
+  
+  // 下边界吸附
+  if (Math.abs(screenHeight - (bounds.y + bounds.height)) < snapThreshold) {
+    newY = screenHeight - bounds.height;
+  }
+  
+  // 检测其他窗口吸附
+  const otherWindows = [];
+  
+  // 添加应用内部窗口
+  if (window !== controlWin && controlWin && !controlWin.isDestroyed() && controlWin.isVisible()) {
+    otherWindows.push(controlWin);
+  }
+  if (window !== appListWin && appListWin && !appListWin.isDestroyed() && appListWin.isVisible()) {
+    otherWindows.push(appListWin);
+  }
+  if (window !== appDetailWin && appDetailWin && !appDetailWin.isDestroyed() && appDetailWin.isVisible()) {
+    otherWindows.push(appDetailWin);
+  }
+  
+  // 添加外部窗口
+  try {
+    const allWindows = BrowserWindow.getAllWindows();
+    for (const win of allWindows) {
+      if (win !== window && win.isVisible() && !win.isDestroyed()) {
+        // 检查是否是应用内部窗口
+        if (win !== controlWin && win !== appListWin && win !== appDetailWin) {
+          otherWindows.push(win);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('获取外部窗口失败:', error);
+  }
+  
+  for (const otherWindow of otherWindows) {
+    const otherBounds = otherWindow.getBounds();
+    
+    // 水平吸附（左对齐）
+    if (Math.abs(bounds.x - (otherBounds.x + otherBounds.width)) < snapThreshold) {
+      newX = otherBounds.x + otherBounds.width;
+    }
+    
+    // 水平吸附（右对齐）
+    if (Math.abs((bounds.x + bounds.width) - otherBounds.x) < snapThreshold) {
+      newX = otherBounds.x - bounds.width;
+    }
+    
+    // 垂直吸附（顶部对齐）
+    if (Math.abs(bounds.y - otherBounds.y) < snapThreshold) {
+      newY = otherBounds.y;
+    }
+    
+    // 垂直吸附（底部对齐）
+    if (Math.abs((bounds.y + bounds.height) - (otherBounds.y + otherBounds.height)) < snapThreshold) {
+      newY = otherBounds.y + otherBounds.height - bounds.height;
+    }
+  }
+  
+  // 如果位置有变化，直接更新窗口位置（无动画）
+  if (newX !== bounds.x || newY !== bounds.y) {
+    window.setPosition(newX, newY);
+  }
+}, 16); // 约60fps的节流
+
+// 加载窗口位置
+function loadWindowPositions() {
+  try {
+    const windowPositions = store.get('windowPositions', {});
+    console.log('加载窗口位置:', windowPositions);
+    return windowPositions;
+  } catch (error) {
+    console.error('加载窗口位置失败:', error);
+    return {};
+  }
+}
+
+// 保存窗口位置
+function saveWindowPositions() {
+  const windowPositions = {};
+  
+  // 保存ControlPanel位置
+  if (controlWin && !controlWin.isDestroyed()) {
+    const bounds = controlWin.getBounds();
+    windowPositions.controlWin = { x: bounds.x, y: bounds.y };
+  }
+  
+  // 保存AppListPanel位置
+  if (appListWin && !appListWin.isDestroyed()) {
+    const bounds = appListWin.getBounds();
+    windowPositions.appListWin = { x: bounds.x, y: bounds.y };
+  }
+  
+  // 保存AppDetailPanel位置
+  if (appDetailWin && !appDetailWin.isDestroyed()) {
+    const bounds = appDetailWin.getBounds();
+    windowPositions.appDetailWin = { x: bounds.x, y: bounds.y };
+  }
+  
+  // 存储到electron-store
+  store.set('windowPositions', windowPositions);
+  console.log('窗口位置已保存:', windowPositions);
+}
+
 app.on('will-quit', () => {
+  // 保存窗口位置
+  saveWindowPositions();
+  
   globalShortcut.unregisterAll();
   
   // ✅【新增】停止应用使用追踪
@@ -1138,123 +999,83 @@ ipcMain.on('window-back', () => {
 
 // 获取应用详情数据
 ipcMain.handle('get-app-detail-data', () => {
-  return global.appDetailData || null;
+  const appData = global.appDetailData || {};
+  // 确保返回完整的数据结构
+  return {
+    ...appData,
+    hourlyData: appData.hourlyData || [],
+    sessions: appData.sessions || []
+  };
 });
 
 // 应用列表选择应用后通知详情面板
 ipcMain.on('app-list-select', (event, appData) => {
+  // 从应用使用追踪器中获取完整的应用数据
+  const appUsageTracker = getAppUsageTracker();
+  const todayStats = appUsageTracker.getTodayStatistics();
+  const fullAppData = todayStats.find(app => app.appName === appData.appName);
+  
+  // 确保数据结构完整
+  const completeAppData = {
+    ...appData,
+    ...fullAppData,
+    hourlyData: fullAppData?.hourlyData || [],
+    sessions: fullAppData?.sessions || []
+  };
+  
   // 存储数据
-  global.appDetailData = appData;
+  global.appDetailData = completeAppData;
   
   // 检查AppDetailPanel是否已存在
   if (appDetailWin && !appDetailWin.isDestroyed() && appDetailWin.isVisible()) {
     console.log('AppDetailPanel已存在，直接更新数据');
     // 通知渲染进程数据已更新
     if (appDetailWin.webContents) {
-      appDetailWin.webContents.send('app-detail-updated', appData);
+      appDetailWin.webContents.send('app-detail-updated', completeAppData);
     }
     return;
   }
   
   // 记录窗口切换历史
-  windowHistory.push({ type: 'app-detail', appData });
+  windowHistory.push({ type: 'app-detail', appData: completeAppData });
   console.log('窗口切换历史:', windowHistory);
   
   // 检查窗口是否存在
   if (!controlWin || controlWin.isDestroyed() || !appListWin || appListWin.isDestroyed()) {
     console.error('窗口不存在，无法执行位置互换动画');
-    createAppDetailWindow(appData);
+    createAppDetailWindow(completeAppData);
     return;
   }
   
   // 执行位置互换动画
-  performPanelSwapAnimation(appData);
+  performPanelSwapAnimation(completeAppData);
 });
 
-// 执行面板位置互换动画
+// 执行面板位置互换（无动画）
 function performPanelSwapAnimation(appData) {
-  console.log('开始执行面板位置互换动画');
-  
-  // 禁用交互，显示提示
-  notifyAllWindowsInteractionLocked(true, '正在调整窗口位置，请稍候...');
+  if (!controlWin || controlWin.isDestroyed() || !appListWin || appListWin.isDestroyed()) {
+    createAppDetailWindow(appData);
+    return;
+  }
   
   const controlBounds = controlWin.getBounds();
   const appListBounds = appListWin.getBounds();
   const windowWidth = 400; // 固定窗口宽度
   
-  // 计算目标位置，确保精确控制
+  // 计算目标位置
   const controlTargetX = controlBounds.x - windowWidth;
   const appListTargetX = appListBounds.x + windowWidth;
   
-  // 验证位置是否在合理范围内
-  const maxDistance = windowWidth + 50; // 最大允许距离
-  const controlDistance = Math.abs(controlTargetX - controlBounds.x);
-  const appListDistance = Math.abs(appListTargetX - appListBounds.x);
+  // 直接设置位置
+  controlWin.setPosition(controlTargetX, controlBounds.y);
+  appListWin.setPosition(appListTargetX, appListBounds.y);
   
-  if (controlDistance > maxDistance || appListDistance > maxDistance) {
-    console.warn('面板位置距离超过预设阈值，调整位置');
-  }
-  
-  // 动画配置
-  const duration = 400; // 400ms动画
-  const frameDuration = 16; // ~60fps
-  const totalFrames = duration / frameDuration;
-  let currentFrame = 0;
-  
-  // 初始位置
-  const controlStartX = controlBounds.x;
-  const appListStartX = appListBounds.x;
-  
-  // 执行动画
-  const animate = () => {
-    if (currentFrame >= totalFrames || !controlWin || controlWin.isDestroyed() || !appListWin || appListWin.isDestroyed()) {
-      // 动画结束，确保最终位置正确
-      if (controlWin && !controlWin.isDestroyed()) {
-        controlWin.setPosition(controlTargetX, controlBounds.y);
-      }
-      if (appListWin && !appListWin.isDestroyed()) {
-        appListWin.setPosition(appListTargetX, appListBounds.y);
-      }
-      
-      console.log('面板位置互换动画完成');
-      
-      // 恢复交互
-      notifyAllWindowsInteractionLocked(false, '');
-      
-      // 延迟50ms后显示AppDetailPanel
-      setTimeout(() => {
-        createAppDetailWindow(appData);
-      }, 50);
-      
-      return;
-    }
-    
-    // 计算当前帧的位置（使用ease-in-out缓动）
-    const progress = currentFrame / totalFrames;
-    const easedProgress = easeInOutQuad(progress);
-    
-    const controlCurrentX = controlStartX - (controlStartX - controlTargetX) * easedProgress;
-    const appListCurrentX = appListStartX + (appListTargetX - appListStartX) * easedProgress;
-    
-    // 更新位置
-    if (controlWin && !controlWin.isDestroyed()) {
-      controlWin.setPosition(Math.round(controlCurrentX), controlBounds.y);
-    }
-    if (appListWin && !appListWin.isDestroyed()) {
-      appListWin.setPosition(Math.round(appListCurrentX), appListBounds.y);
-    }
-    
-    currentFrame++;
-    setTimeout(animate, frameDuration);
-  };
-  
-  // 开始动画
-  animate();
+  // 显示AppDetailPanel
+  createAppDetailWindow(appData);
 }
 
-// 恢复面板位置函数
+// 恢复面板位置函数（无动画）
 function restorePanelPositions() {
-  console.log('恢复面板位置');
   if (controlWin && !controlWin.isDestroyed() && appListWin && !appListWin.isDestroyed()) {
     const controlBounds = controlWin.getBounds();
     const windowWidth = 400; // 固定窗口宽度
@@ -1263,52 +1084,9 @@ function restorePanelPositions() {
     const controlTargetX = controlBounds.x + windowWidth;
     const appListTargetX = appListWin.getBounds().x - windowWidth;
     
-    // 动画配置
-    const duration = 300; // 300ms动画
-    const frameDuration = 16; // ~60fps
-    const totalFrames = duration / frameDuration;
-    let currentFrame = 0;
-    
-    // 初始位置
-    const controlStartX = controlBounds.x;
-    const appListStartX = appListWin.getBounds().x;
-    
-    // 执行动画
-    const animate = () => {
-      if (currentFrame >= totalFrames || !controlWin || controlWin.isDestroyed() || !appListWin || appListWin.isDestroyed()) {
-        // 动画结束，确保最终位置正确
-        if (controlWin && !controlWin.isDestroyed()) {
-          controlWin.setPosition(controlTargetX, controlBounds.y);
-        }
-        if (appListWin && !appListWin.isDestroyed()) {
-          appListWin.setPosition(appListTargetX, appListWin.getBounds().y);
-        }
-        
-        console.log('面板位置恢复完成');
-        return;
-      }
-      
-      // 计算当前帧的位置（使用ease-in-out缓动）
-      const progress = currentFrame / totalFrames;
-      const easedProgress = easeInOutQuad(progress);
-      
-      const controlCurrentX = controlStartX + (controlTargetX - controlStartX) * easedProgress;
-      const appListCurrentX = appListStartX - (appListStartX - appListTargetX) * easedProgress;
-      
-      // 更新位置
-      if (controlWin && !controlWin.isDestroyed()) {
-        controlWin.setPosition(Math.round(controlCurrentX), controlBounds.y);
-      }
-      if (appListWin && !appListWin.isDestroyed()) {
-        appListWin.setPosition(Math.round(appListCurrentX), appListWin.getBounds().y);
-      }
-      
-      currentFrame++;
-      setTimeout(animate, frameDuration);
-    };
-    
-    // 开始动画
-    animate();
+    // 直接设置位置
+    controlWin.setPosition(controlTargetX, controlBounds.y);
+    appListWin.setPosition(appListTargetX, appListWin.getBounds().y);
   }
 }
 
