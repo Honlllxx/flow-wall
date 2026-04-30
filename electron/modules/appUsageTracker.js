@@ -787,6 +787,7 @@ class AppUsageTracker {
         ipcMain.handle('app-usage:get-longest-session', (event, appName = null) => this.getLongestSession(appName));
         ipcMain.handle('app-usage:get-historical-trend', (event, days) => this.getHistoricalTrend(days));
         ipcMain.handle('app-usage:is-running', () => this.isRunning);
+        ipcMain.handle('app-usage:get-insights', (event, appName = null, days = 7) => this.generateInsights(appName, days));
         ipcMain.on('app-usage:set-config', (event, config) => {
             if (config.updateInterval) this.updateInterval = config.updateInterval;
             if (config.saveInterval) this.saveInterval = config.saveInterval;
@@ -1336,6 +1337,442 @@ class AppUsageTracker {
         }
         
         return findings;
+    }
+    
+    /**
+     * 生成综合性洞察报告
+     * 包含：使用趋势分析、专注度评估、效率提升建议
+     * @param {string} appName - 可选参数，指定应用名称时只分析该应用
+     * @param {number} days - 分析的天数
+     * @returns {Object} - 综合性洞察报告
+     */
+    generateInsights(appName = null, days = 7) {
+        let todayData = this.getTodayStatistics();
+        
+        // 如果指定了应用名称，只获取该应用的数据
+        if (appName) {
+            todayData = todayData.filter(app => app.appName === appName);
+        }
+        
+        const historicalTrend = this.getHistoricalTrend(days);
+        const peakAnalysis = this.getPeakUsagePeriod();
+        const longestSession = this.getLongestSession(appName);
+        
+        // 计算专注度指标
+        const focusAnalysis = this.analyzeFocusLevel(todayData);
+        
+        // 计算效率指标
+        const efficiencyAnalysis = this.analyzeEfficiency(todayData, historicalTrend);
+        
+        // 生成建议
+        const suggestions = this.generateSuggestions(focusAnalysis, efficiencyAnalysis, peakAnalysis);
+        
+        // 汇总报告
+        const report = {
+            reportId: `insights-${Date.now()}`,
+            generatedAt: new Date().toISOString(),
+            analyzedDays: days,
+            
+            // 概览数据
+            overview: {
+                totalApps: todayData.length,
+                totalSessions: todayData.reduce((sum, app) => sum + (app.sessionCount || 0), 0),
+                todayUsageMinutes: Math.round(peakAnalysis.totalDuration / 60000),
+                avgSessionMinutes: this.calculateAverageSessionDuration(todayData),
+                peakHour: peakAnalysis.peakHour,
+                peakHourFormatted: peakAnalysis.peakHourFormatted
+            },
+            
+            // 使用趋势分析
+            usageTrend: {
+                trendData: historicalTrend.trendData.map(day => ({
+                    date: day.date,
+                    durationMinutes: Math.round(day.totalDuration / 60000),
+                    sessionCount: day.sessionCount,
+                    hasData: day.hasData
+                })),
+                trendDirection: this.analyzeTrendDirection(historicalTrend.trendData),
+                weeklyComparison: this.compareWeeklyUsage(historicalTrend.trendData),
+                dailyPattern: this.analyzeDailyPattern(peakAnalysis)
+            },
+            
+            // 专注度评估
+            focusAnalysis: {
+                focusScore: focusAnalysis.score,
+                focusLevel: focusAnalysis.level,
+                focusDurationMinutes: Math.round(focusAnalysis.totalFocusDuration / 60000),
+                focusSessions: focusAnalysis.focusSessions,
+                averageFocusDurationMinutes: focusAnalysis.avgFocusDuration,
+                longestFocusMinutes: Math.round(focusAnalysis.longestFocusDuration / 60000),
+                focusBreaks: focusAnalysis.breaks,
+                focusPeriods: focusAnalysis.periods
+            },
+            
+            // 效率分析
+            efficiencyAnalysis: {
+                efficiencyScore: efficiencyAnalysis.score,
+                efficiencyLevel: efficiencyAnalysis.level,
+                productiveMinutes: Math.round(efficiencyAnalysis.productiveDuration / 60000),
+                distractionMinutes: Math.round(efficiencyAnalysis.distractionDuration / 60000),
+                productivityRatio: efficiencyAnalysis.productivityRatio,
+                topApps: efficiencyAnalysis.topApps,
+                timeWastingApps: efficiencyAnalysis.timeWastingApps,
+                multitaskingScore: efficiencyAnalysis.multitaskingScore
+            },
+            
+            // 最长会话
+            longestSession: longestSession.found ? {
+                appName: longestSession.appName,
+                durationMinutes: Math.round(longestSession.durationMs / 60000),
+                durationFormatted: longestSession.durationFormatted,
+                startTime: longestSession.startTime,
+                endTime: longestSession.endTime
+            } : null,
+            
+            // 效率提升建议
+            suggestions: suggestions,
+            
+            // 原始数据供可视化
+            rawData: {
+                hourlyData: peakAnalysis.hourlyData,
+                hourlyPercentages: peakAnalysis.hourlyPercentages
+            }
+        };
+        
+        return report;
+    }
+    
+    /**
+     * 分析专注度水平
+     */
+    analyzeFocusLevel(appData) {
+        let totalFocusDuration = 0;
+        let focusSessions = 0;
+        let longestFocusDuration = 0;
+        let breaks = 0;
+        let periods = [];
+        
+        appData.forEach(app => {
+            if (app.sessions && Array.isArray(app.sessions)) {
+                app.sessions.forEach(session => {
+                    const duration = session.durationMs || this.parseDuration(session.duration);
+                    
+                    // 专注会话定义：持续时间超过5分钟
+                    if (duration > 5 * 60 * 1000) {
+                        totalFocusDuration += duration;
+                        focusSessions++;
+                        if (duration > longestFocusDuration) {
+                            longestFocusDuration = duration;
+                        }
+                        
+                        periods.push({
+                            appName: app.appName,
+                            startTime: session.startTime,
+                            durationMs: duration,
+                            durationFormatted: this.formatDuration(duration)
+                        });
+                    } else {
+                        // 短会话视为中断
+                        breaks++;
+                    }
+                });
+            }
+        });
+        
+        const avgFocusDuration = focusSessions > 0 ? Math.round((totalFocusDuration / focusSessions) / 60000) : 0;
+        
+        // 计算专注度分数（0-100）
+        // 基于：专注会话比例、平均专注时长、最长专注时长
+        const totalSessions = appData.reduce((sum, app) => sum + (app.sessionCount || 0), 0);
+        const focusRatio = totalSessions > 0 ? focusSessions / totalSessions : 0;
+        const avgDurationScore = Math.min(avgFocusDuration / 30, 1); // 30分钟为满分
+        const longestDurationScore = Math.min(longestFocusDuration / (60 * 60 * 1000), 1); // 1小时为满分
+        
+        const score = Math.round((focusRatio * 0.4 + avgDurationScore * 0.3 + longestDurationScore * 0.3) * 100);
+        
+        let level = 'low';
+        if (score >= 80) level = 'high';
+        else if (score >= 50) level = 'medium';
+        
+        return {
+            score,
+            level,
+            totalFocusDuration,
+            focusSessions,
+            avgFocusDuration,
+            longestFocusDuration,
+            breaks,
+            periods
+        };
+    }
+    
+    /**
+     * 分析效率
+     */
+    analyzeEfficiency(appData, historicalTrend) {
+        // 定义高效应用类别（根据业务需求调整）
+        const productiveCategories = ['开发工具', '办公软件', '学习软件'];
+        const distractingCategories = ['社交媒体', '游戏', '娱乐'];
+        
+        let productiveDuration = 0;
+        let distractionDuration = 0;
+        let topApps = [];
+        let timeWastingApps = [];
+        let totalSwitches = 0;
+        
+        appData.forEach(app => {
+            const duration = app.totalDuration || 0;
+            const category = app.category || '未分类';
+            
+            if (productiveCategories.includes(category)) {
+                productiveDuration += duration;
+                topApps.push({ appName: app.appName, durationMs: duration, category });
+            } else if (distractingCategories.includes(category)) {
+                distractionDuration += duration;
+                timeWastingApps.push({ appName: app.appName, durationMs: duration, category });
+            } else {
+                // 未分类应用按比例分配
+                productiveDuration += duration * 0.6;
+                distractionDuration += duration * 0.4;
+            }
+            
+            totalSwitches += (app.sessionCount || 0) - 1;
+        });
+        
+        // 计算多任务处理分数（切换次数越多分数越低）
+        const totalDuration = productiveDuration + distractionDuration;
+        const switchesPerHour = totalDuration > 0 ? (totalSwitches * 3600000) / totalDuration : 0;
+        const multitaskingScore = Math.max(0, 100 - Math.round(switchesPerHour * 10));
+        
+        // 计算效率分数
+        const productivityRatio = totalDuration > 0 ? productiveDuration / totalDuration : 0;
+        const efficiencyScore = Math.round((productivityRatio * 0.7 + (multitaskingScore / 100) * 0.3) * 100);
+        
+        let level = 'low';
+        if (efficiencyScore >= 80) level = 'high';
+        else if (efficiencyScore >= 50) level = 'medium';
+        
+        // 排序应用
+        topApps.sort((a, b) => b.durationMs - a.durationMs).slice(0, 5);
+        timeWastingApps.sort((a, b) => b.durationMs - a.durationMs).slice(0, 5);
+        
+        return {
+            score: efficiencyScore,
+            level,
+            productiveDuration,
+            distractionDuration,
+            productivityRatio: Math.round(productivityRatio * 100),
+            topApps: topApps.map(app => ({
+                ...app,
+                durationFormatted: this.formatDuration(app.durationMs)
+            })),
+            timeWastingApps: timeWastingApps.map(app => ({
+                ...app,
+                durationFormatted: this.formatDuration(app.durationMs)
+            })),
+            multitaskingScore
+        };
+    }
+    
+    /**
+     * 生成效率提升建议
+     */
+    generateSuggestions(focusAnalysis, efficiencyAnalysis, peakAnalysis) {
+        const suggestions = [];
+        
+        // 专注度建议
+        if (focusAnalysis.level === 'low') {
+            suggestions.push({
+                id: 'focus-low',
+                priority: 'high',
+                category: 'focus',
+                title: '提升专注时长',
+                description: '当前专注会话较短，建议尝试番茄工作法，每25分钟休息5分钟',
+                action: '设定专注目标，使用计时器保持专注',
+                data: {
+                    currentScore: focusAnalysis.score,
+                    suggestedImprovement: '增加专注会话时长至25分钟以上'
+                }
+            });
+        }
+        
+        if (focusAnalysis.breaks > focusAnalysis.focusSessions) {
+            suggestions.push({
+                id: 'focus-breaks',
+                priority: 'medium',
+                category: 'focus',
+                title: '减少频繁切换',
+                description: '检测到较多的短会话，可能影响专注效率',
+                action: '尝试在完成当前任务后再切换到其他应用',
+                data: {
+                    breaks: focusAnalysis.breaks,
+                    focusSessions: focusAnalysis.focusSessions
+                }
+            });
+        }
+        
+        // 效率建议
+        if (efficiencyAnalysis.level === 'low') {
+            suggestions.push({
+                id: 'efficiency-low',
+                priority: 'high',
+                category: 'efficiency',
+                title: '优化时间分配',
+                description: `当前生产性应用使用占比仅${efficiencyAnalysis.productivityRatio}%`,
+                action: '减少娱乐类应用使用时间，专注于高价值任务',
+                data: {
+                    currentRatio: efficiencyAnalysis.productivityRatio,
+                    targetRatio: 70
+                }
+            });
+        }
+        
+        if (efficiencyAnalysis.multitaskingScore < 60) {
+            suggestions.push({
+                id: 'multitasking',
+                priority: 'medium',
+                category: 'efficiency',
+                title: '减少多任务处理',
+                description: '频繁切换应用会降低工作效率',
+                action: '尝试批量处理相似任务，减少上下文切换',
+                data: {
+                    multitaskingScore: efficiencyAnalysis.multitaskingScore
+                }
+            });
+        }
+        
+        // 峰值时段建议
+        if (peakAnalysis.hasValidData) {
+            suggestions.push({
+                id: 'peak-usage',
+                priority: 'low',
+                category: 'timing',
+                title: '利用高峰时段',
+                description: `您的使用高峰在${peakAnalysis.peakHourFormatted}，建议将重要任务安排在此时段`,
+                action: '根据使用高峰调整工作计划',
+                data: {
+                    peakHour: peakAnalysis.peakHour,
+                    peakDuration: peakAnalysis.peakDurationFormatted
+                }
+            });
+        }
+        
+        // 趋势建议
+        if (focusAnalysis.focusSessions > 0 && focusAnalysis.avgFocusDuration < 15) {
+            suggestions.push({
+                id: 'focus-duration',
+                priority: 'medium',
+                category: 'focus',
+                title: '延长专注时长',
+                description: `当前平均专注时长为${focusAnalysis.avgFocusDuration}分钟，建议逐步提升`,
+                action: '每次增加5分钟专注时间，逐步达到25分钟',
+                data: {
+                    currentAvg: focusAnalysis.avgFocusDuration,
+                    targetAvg: 25
+                }
+            });
+        }
+        
+        return suggestions.sort((a, b) => {
+            const priorityOrder = { 'high': 0, 'medium': 1, 'low': 2 };
+            return priorityOrder[a.priority] - priorityOrder[b.priority];
+        });
+    }
+    
+    /**
+     * 分析趋势方向
+     */
+    analyzeTrendDirection(trendData) {
+        if (trendData.length < 3) return 'insufficient_data';
+        
+        const recentData = trendData.slice(-3);
+        const earlierData = trendData.slice(0, 3);
+        
+        const recentAvg = recentData.reduce((sum, d) => sum + d.totalDuration, 0) / recentData.length;
+        const earlierAvg = earlierData.reduce((sum, d) => sum + d.totalDuration, 0) / earlierData.length;
+        
+        const change = ((recentAvg - earlierAvg) / earlierAvg) * 100;
+        
+        if (change > 10) return 'increasing';
+        if (change < -10) return 'decreasing';
+        return 'stable';
+    }
+    
+    /**
+     * 比较本周与上周使用情况
+     */
+    compareWeeklyUsage(trendData) {
+        const weekDays = trendData.slice(-7);
+        const prevWeekDays = trendData.slice(-14, -7);
+        
+        const weekTotal = weekDays.reduce((sum, d) => sum + d.totalDuration, 0);
+        const prevWeekTotal = prevWeekDays.reduce((sum, d) => sum + d.totalDuration, 0);
+        
+        const change = prevWeekTotal > 0 ? ((weekTotal - prevWeekTotal) / prevWeekTotal) * 100 : 0;
+        
+        return {
+            currentWeekMinutes: Math.round(weekTotal / 60000),
+            previousWeekMinutes: Math.round(prevWeekTotal / 60000),
+            changePercentage: Math.round(change),
+            changeDirection: change > 0 ? 'up' : change < 0 ? 'down' : 'same'
+        };
+    }
+    
+    /**
+     * 分析每日模式
+     */
+    analyzeDailyPattern(peakAnalysis) {
+        const hourlyData = peakAnalysis.hourlyData;
+        
+        // 定义时段
+        const periods = {
+            morning: { hours: [6, 7, 8, 9, 10, 11], label: '上午' },
+            afternoon: { hours: [12, 13, 14, 15, 16, 17], label: '下午' },
+            evening: { hours: [18, 19, 20, 21, 22, 23], label: '晚上' },
+            night: { hours: [0, 1, 2, 3, 4, 5], label: '深夜' }
+        };
+        
+        const periodData = {};
+        let maxPeriod = null;
+        let maxDuration = 0;
+        
+        Object.keys(periods).forEach(period => {
+            const duration = periods[period].hours.reduce((sum, hour) => sum + (hourlyData[hour] || 0), 0);
+            periodData[period] = {
+                label: periods[period].label,
+                durationMs: duration,
+                durationMinutes: Math.round(duration / 60000),
+                percentage: peakAnalysis.totalDuration > 0 
+                    ? Math.round((duration / peakAnalysis.totalDuration) * 100) 
+                    : 0
+            };
+            
+            if (duration > maxDuration) {
+                maxDuration = duration;
+                maxPeriod = period;
+            }
+        });
+        
+        return {
+            periods: periodData,
+            mostActivePeriod: maxPeriod,
+            mostActivePeriodLabel: periodData[maxPeriod]?.label || '未知'
+        };
+    }
+    
+    /**
+     * 计算平均会话时长
+     */
+    calculateAverageSessionDuration(appData) {
+        let totalDuration = 0;
+        let totalSessions = 0;
+        
+        appData.forEach(app => {
+            totalDuration += app.totalDuration || 0;
+            totalSessions += app.sessionCount || 0;
+        });
+        
+        return totalSessions > 0 ? Math.round((totalDuration / totalSessions) / 60000) : 0;
     }
 }
 
