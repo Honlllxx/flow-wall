@@ -69,14 +69,14 @@ const StatCard = ({ icon: Icon, title, value, subValue, color, isLight }) => {
   );
 };
 
-// 时间线组件
+// 时间线组件（显示每小时使用汇总）
 const Timeline = ({ sessions, isLight }) => {
   return (
     <div className="space-y-3">
       {sessions?.map((session, index) => (
         <div key={index} className="flex items-center gap-4">
           <div className={`w-16 text-xs ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
-            {session.startTime}
+            {session.time || session.startTime}
           </div>
           <div className="flex-1 relative">
             <div className={`h-2 rounded-full ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
@@ -87,7 +87,7 @@ const Timeline = ({ sessions, isLight }) => {
             </div>
           </div>
           <div className={`w-20 text-xs text-right ${isLight ? 'text-gray-600' : 'text-gray-300'}`}>
-            {session.duration}
+            {session.durationText || session.duration}
           </div>
         </div>
       ))}
@@ -490,11 +490,11 @@ const AppDetailPanel = () => {
                 <Clock3 size={16} />
                 今日会话
               </h3>
-              {appData.sessions && appData.sessions.length > 0 ? (
-                <Timeline sessions={appData.sessions} isLight={isLight} />
+              {appData.hourlySummary && appData.hourlySummary.length > 0 ? (
+                <Timeline sessions={appData.hourlySummary} isLight={isLight} />
               ) : (
                 <div className={`flex items-center justify-center h-20 text-xs ${isLight ? 'text-gray-400' : 'text-gray-500'}`}>
-                  今日暂无会话数据
+                  今日暂无使用数据
                 </div>
               )}
             </div>
