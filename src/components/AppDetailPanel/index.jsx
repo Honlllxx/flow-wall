@@ -609,7 +609,10 @@ const AppDetailPanel = () => {
                 </h3>
                 <div className="h-40">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={historicalTrend.trendData || []}>
+                    <BarChart data={historicalTrend.trendData.map(item => ({
+                      ...item,
+                      durationMinutes: Math.round(item.totalDuration / 60000) // 毫秒转换为分钟
+                    })) || []}>
                       <CartesianGrid strokeDasharray="3 3" stroke={isLight ? '#e5e7eb' : 'rgba(255,255,255,0.1)'} />
                       <XAxis 
                         dataKey="date" 
@@ -630,7 +633,7 @@ const AppDetailPanel = () => {
                         }}
                         formatter={(value) => [`${value} 分钟`, '使用时长']}
                       />
-                      <Bar dataKey="totalDuration" fill="#60A5FA" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="durationMinutes" fill="#60A5FA" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
