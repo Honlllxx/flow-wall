@@ -796,6 +796,149 @@ class AppUsageTracker {
         ipcMain.handle('app-usage:get-validation', () => this.validatePeakCalculation());
         ipcMain.handle('app-usage:analyze-peak-periods', (event, days) => this.analyzePeakUsagePeriods(days));
         ipcMain.handle('app-usage:export-report', (event, days) => this.exportAnalysisReport(days));
+        // 网站统计 API
+        ipcMain.handle('app-usage:get-websites', () => this.getWebsiteStatistics());
+        ipcMain.handle('app-usage:get-website-detail', (event, domain) => this.getWebsiteDetail(domain));
+    }
+    
+    /**
+     * 处理浏览器扩展发送的网站数据
+     */
+    handleWebsiteData(data) {
+        if (!data || !data.domain) return;
+
+        const { domain, name, totalDuration, visitCount, lastVisit } = data;
+        
+        const appName = domain;
+        
+        if (!this.usageData.has(appName)) {
+            this.usageData.set(appName, {
+                totalDuration: 0,
+                sessionCount: 0,
+                category: '网站',
+                lastUsed: this.formatTime(),
+                hourlyData: new Array(24).fill(0),
+                sessions: [],
+                websiteInfo: {
+                    domain: domain,
+                    displayName: name || domain,
+                    favicon: null,
+                    browser: null
+                }
+            });
+        }
+
+        const appData = this.usageData.get(appName);
+        appData.totalDuration += totalDuration || 0;
+        appData.sessionCount += visitCount || 1;
+        appData.lastUsed = lastVisit ? new Date(lastVisit).toLocaleTimeString() : this.formatTime();
+        
+        if (name && !appData.websiteInfo.displayName) {
+            appData.websiteInfo.displayName = name;
+        }
+
+        console.log(`[AppUsageTracker] 网站数据更新: ${domain}, 时长: ${totalDuration}`);
+        
+        this.saveData();
+    }
+    
+    /**
+     * 获取网站使用统计
+     */
+    getWebsiteStatistics() {
+        const websiteStats = [];
+        
+        for (const [appName, data] of this.usageData.entries()) {
+            if (data.category === '网站') {
+                websiteStats.push({
+                    appName: appName,
+                    domain: data.websiteInfo?.domain || appName,
+                    name: data.websiteInfo?.displayName || appName,
+                    totalDuration: data.totalDuration,
+                    totalDurationFormatted: this.formatDuration(data.totalDuration),
+                    sessionCount: data.sessionCount,
+                    lastUsed: data.lastUsed,
+                    category: data.category
+                });
+            }
+        }
+        
+        return websiteStats.sort((a, b) => b.totalDuration - a.totalDuration);
+    }
+    
+    /**
+     * 获取单个网站详细信息
+     */
+    getWebsiteDetail(domain) {
+        const appName = domain;
+        
+        if (this.usageData.has(appName)) {
+            const data = this.usageData.get(appName);
+            return {
+                appName: appName,
+                domain: data.websiteInfo?.domain || appName,
+                name: data.websiteInfo?.displayName || appName,
+                favicon: data.websiteInfo?.favicon,
+                browser: data.websiteInfo?.browser,
+                totalDuration: data.totalDuration,
+                totalDurationFormatted: this.formatDuration(data.totalDuration),
+                sessionCount: data.sessionCount,
+                lastUsed: data.lastUsed,
+                category: data.category,
+                hourlyData: data.hourlyData || new Array(24).fill(0),
+                sessions: data.sessions || []
+            };
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 设置 Native Messaging 监听器
+     */
+    setupNativeMessaging() {
+        process.stdin.setEncoding('utf8');
+        
+        let buffer = '';
+        process.stdin.on('data', (data) => {
+            buffer += data;
+            
+            while (buffer.length >= 4) {
+                const length = buffer.readUInt32LE(0);
+                
+                if (buffer.length >= length + 4) {
+                    const message = buffer.substring(4, length + 4);
+                    
+                    try {
+                        const data = JSON.parse(message);
+                        
+                        if (data.type === 'website_data') {
+                            this.handleWebsiteData(data.data);
+                        }
+                    } catch (error) {
+                        console.error('[AppUsageTracker] 解析 Native Messaging 消息失败:', error);
+                    }
+                    
+                    buffer = buffer.substring(length + 4);
+                } else {
+                    break;
+                }
+            }
+        });
+        
+        console.log('[AppUsageTracker] Native Messaging 监听器已启动');
+    }
+    
+    /**
+     * 发送消息到浏览器扩展
+     */
+    sendMessageToExtension(message) {
+        const jsonStr = JSON.stringify(message);
+        const length = Buffer.alloc(4);
+        length.writeUInt32LE(jsonStr.length, 0);
+        
+        process.stdout.write(length);
+        process.stdout.write(jsonStr);
     }
     
     /**
