@@ -137,17 +137,21 @@ const AppDetailPanel = () => {
       }));
     };
     
-    const processSessionData = (sessions) => {
-      // 处理会话数据，确保格式正确
-      if (!sessions || !Array.isArray(sessions)) {
+    const processHourlySummary = (hourlyData) => {
+      // 处理每小时汇总数据，用于今日会话显示
+      if (!hourlyData || hourlyData.length !== 24) {
         return [];
       }
-      return sessions.map(session => ({
-        startTime: session.startTime,
-        endTime: session.endTime,
-        duration: session.duration,
-        percentage: session.percentage || 0
-      }));
+      return hourlyData.map((duration, hour) => {
+        const minutes = Math.round(duration / 60000);
+        return {
+          hour: hour,
+          time: `${hour.toString().padStart(2, '0')}:00`,
+          duration: minutes,
+          durationText: minutes > 0 ? `${minutes}分钟` : '0分钟',
+          percentage: Math.min(Math.round((duration / 3600000) * 100), 100)
+        };
+      }).filter(item => item.duration > 0); // 只显示有使用记录的小时
     };
     
     const loadData = async () => {
@@ -159,7 +163,7 @@ const AppDetailPanel = () => {
             const completeData = {
               ...data,
               hourlyData: processHourlyData(data?.hourlyData),
-              sessions: processSessionData(data?.sessions)
+              hourlySummary: processHourlySummary(data?.hourlyData) // 使用每小时汇总数据
             };
             setAppData(completeData);
             setNewCategory(data?.category || '');
@@ -182,7 +186,7 @@ const AppDetailPanel = () => {
         const completeData = {
           ...appData,
           hourlyData: processHourlyData(appData?.hourlyData),
-          sessions: processSessionData(appData?.sessions)
+          hourlySummary: processHourlySummary(appData?.hourlyData) // 使用每小时汇总数据
         };
         setAppData(completeData);
         setNewCategory(appData?.category || '');

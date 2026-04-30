@@ -183,35 +183,60 @@ class AppUsageTracker {
             data.lastUsed = this.formatTime();
             data.category = category;
             
-            // 更新每小时使用数据
-            const startTimeHour = new Date(this.currentApp.startTime).getHours();
-            const endTimeHour = new Date(endTime).getHours();
+            // 更新每小时使用数据（支持跨越任意小时数）
+            const startDate = new Date(this.currentApp.startTime);
+            const endDate = new Date(endTime);
+            const startTimeHour = startDate.getHours();
+            const endTimeHour = endDate.getHours();
             
             if (startTimeHour === endTimeHour) {
                 // 同小时内的会话
                 data.hourlyData[startTimeHour] += duration;
             } else {
-                // 跨小时的会话，需要拆分
-                const startOfNextHour = new Date(this.currentApp.startTime);
-                startOfNextHour.setHours(startTimeHour + 1, 0, 0, 0);
-                const firstPartDuration = startOfNextHour.getTime() - this.currentApp.startTime;
-                const secondPartDuration = endTime - startOfNextHour.getTime();
+                // 跨小时的会话，需要拆分到每个小时
+                let currentTime = this.currentApp.startTime;
+                let currentHour = startTimeHour;
                 
-                data.hourlyData[startTimeHour] += firstPartDuration;
-                data.hourlyData[endTimeHour] += secondPartDuration;
+                while (currentHour <= endTimeHour && currentTime < endTime) {
+                    // 获取当前小时结束时间
+                    const hourEnd = new Date(currentTime);
+                    hourEnd.setHours(currentHour + 1, 0, 0, 0);
+                    
+                    // 计算当前小时内的使用时间
+                    const segmentEnd = Math.min(hourEnd.getTime(), endTime);
+                    const segmentDuration = segmentEnd - currentTime;
+                    
+                    // 累加到对应小时
+                    data.hourlyData[currentHour] += segmentDuration;
+                    
+                    // 移动到下一小时
+                    currentTime = segmentEnd;
+                    currentHour++;
+                }
             }
             
-            // 添加会话记录（以小时为单位）
-            const startHour = new Date(this.currentApp.startTime).getHours();
-            const endHour = new Date(endTime).getHours();
+            // 添加会话记录（以小时为单位，包含详细时间信息）
+            const startHour = startDate.getHours();
+            const endHour = endDate.getHours();
             data.sessions.push({
+                // 精确时间戳（毫秒）
+                startTimeStamp: this.currentApp.startTime,
+                endTimeStamp: endTime,
+                // 小时信息
                 startHour: startHour,
                 endHour: endHour,
-                timeRange: `${startHour}:00 - ${endHour + 1}:00`, // 显示为小时区间
-                startTime: new Date(this.currentApp.startTime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-                endTime: new Date(endTime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+                // 时间区间显示
+                timeRange: this.formatTimeRange(startHour, endHour),
+                // 格式化时间显示
+                startTime: startDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+                endTime: endDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+                // 持续时间
                 duration: this.formatDuration(duration),
-                percentage: Math.min(Math.round((duration / 3600000) * 100), 100) // 以小时为单位的百分比
+                durationMs: duration, // 保留原始毫秒值
+                // 使用百分比（基于小时）
+                percentage: Math.min(Math.round((duration / 3600000) * 100), 100),
+                // 窗口标题
+                windowTitle: this.currentApp.windowTitle
             });
             
             // 限制会话记录数量，只保留最近的100条
@@ -489,13 +514,20 @@ class AppUsageTracker {
     formatDuration(milliseconds) {
         const seconds = Math.floor(milliseconds / 1000);
         const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        
+        if (hours > 0) {
+            const remainingMinutes = minutes % 60;
+            return remainingMinutes > 0 ? `${hours}小时${remainingMinutes}分钟` : `${hours}小时`;
+        }
         return `${minutes}分钟`;
     }
     
-    formatDuration(milliseconds) {
-        const seconds = Math.floor(milliseconds / 1000);
-        const minutes = Math.floor(seconds / 60);
-        return `${minutes}分钟`;
+    formatTimeRange(startHour, endHour) {
+        if (startHour === endHour) {
+            return `${startHour}:00 - ${startHour + 1}:00`;
+        }
+        return `${startHour}:00 - ${endHour + 1}:00`;
     }
 
     setupIPC() {
