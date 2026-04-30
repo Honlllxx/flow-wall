@@ -7,7 +7,7 @@ import {
 import {
   Clock, Zap, Timer, Eye, X, LayoutGrid, Clock3,
   TrendingUp, BarChart3, Activity, Download, ChevronLeft,
-  Calendar, Target, Award, Lock, Edit, Save, X as XIcon
+  Calendar, Target, Award, Lock, Edit, Save, X as XIcon, Lightbulb
 } from 'lucide-react';
 import { useWindowInteraction } from '../../hooks/useWindowInteraction';
 
@@ -125,6 +125,7 @@ const AppDetailPanel = () => {
   const [peakAnalysis, setPeakAnalysis] = useState(null);
   const [longestSession, setLongestSession] = useState(null);
   const [historicalTrend, setHistoricalTrend] = useState(null);
+  const [insights, setInsights] = useState(null);
 
   // 从主进程获取应用数据
   useEffect(() => {
@@ -204,6 +205,13 @@ const AppDetailPanel = () => {
           if (isMounted) {
             setHistoricalTrend(trendData);
             console.log('历史趋势数据:', trendData);
+          }
+          
+          // 获取洞察报告（传入应用名称）
+          const insightsData = await window.api.appUsage.getInsights(appName);
+          if (isMounted) {
+            setInsights(insightsData);
+            console.log('洞察报告数据:', insightsData);
           }
         }
       } catch (e) {
@@ -677,6 +685,7 @@ const AppDetailPanel = () => {
                 使用洞察
               </h3>
               <div className="space-y-4">
+                {/* 使用趋势 */}
                 <div className="flex items-start gap-3">
                   <div className={`p-2 rounded-xl ${isLight ? 'bg-white' : 'bg-white/10'}`}>
                     <TrendingUp size={16} className={isLight ? 'text-purple-600' : 'text-purple-400'} />
@@ -686,12 +695,21 @@ const AppDetailPanel = () => {
                       使用趋势
                     </h4>
                     <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
-                      相比昨天，使用时长增加了 <span className="font-semibold text-green-500">15%</span>，
-                      会话次数增加了 <span className="font-semibold text-green-500">22%</span>。
+                      {insights?.usageTrend ? (
+                        <>相比昨天，使用时长{insights.usageTrend.trendDirection === 'increasing' ? '增加' : insights.usageTrend.trendDirection === 'decreasing' ? '减少' : '保持稳定'}
+                        {insights.usageTrend.weeklyComparison && (
+                          <>了 <span className={`font-semibold ${insights.usageTrend.weeklyComparison.changeDirection === 'up' ? 'text-green-500' : insights.usageTrend.weeklyComparison.changeDirection === 'down' ? 'text-red-500' : 'text-gray-500'}`}>
+                            {Math.abs(insights.usageTrend.weeklyComparison.changePercentage)}%
+                          </span></>
+                        )}。
+                      </> ) : (
+                        '数据加载中...'
+                      )}
                     </p>
                   </div>
                 </div>
 
+                {/* 专注度分析 */}
                 <div className="flex items-start gap-3">
                   <div className={`p-2 rounded-xl ${isLight ? 'bg-white' : 'bg-white/10'}`}>
                     <Clock size={16} className={isLight ? 'text-blue-600' : 'text-blue-400'} />
@@ -701,12 +719,20 @@ const AppDetailPanel = () => {
                       专注度分析
                     </h4>
                     <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
-                      平均会话时长 <span className="font-semibold text-blue-500">{appData.sessionCount > 0 ? formatDuration(appData.totalDuration / appData.sessionCount) : '45分钟'}</span>，
-                      表明您在使用此应用时较为专注。
+                      {insights?.focusAnalysis ? (
+                        <>平均会话时长 <span className="font-semibold text-blue-500">{insights.focusAnalysis.averageFocusDurationMinutes}分钟</span>，
+                        专注度评分 <span className="font-semibold text-blue-500">{insights.focusAnalysis.focusScore}分</span>，
+                        {insights.focusAnalysis.focusLevel === 'high' ? '表明您在使用此应用时非常专注。' : 
+                         insights.focusAnalysis.focusLevel === 'medium' ? '表明您在使用此应用时较为专注。' : 
+                         '建议提升专注时长以提高效率。'}
+                      </> ) : (
+                        '数据加载中...'
+                      )}
                     </p>
                   </div>
                 </div>
 
+                {/* 效率建议 */}
                 <div className="flex items-start gap-3">
                   <div className={`p-2 rounded-xl ${isLight ? 'bg-white' : 'bg-white/10'}`}>
                     <Activity size={16} className={isLight ? 'text-green-600' : 'text-green-400'} />
@@ -716,11 +742,37 @@ const AppDetailPanel = () => {
                       效率建议
                     </h4>
                     <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
-                      建议在 <span className="font-semibold text-yellow-500">{appData.peakHour ? `${appData.peakHour}:00-${appData.peakHour + 1}:00` : '14:00-16:00'}</span> 期间
-                      集中处理相关任务，这是您使用此应用效率最高的时段。
+                      {insights?.usageTrend?.dailyPattern ? (
+                        <>建议在 <span className="font-semibold text-yellow-500">{insights.usageTrend.dailyPattern.mostActivePeriodLabel}</span> 期间
+                        集中处理相关任务，这是您使用此应用最活跃的时段。
+                      </> ) : (
+                        '建议在使用高峰时段集中处理任务，以提高效率。'
+                      )}
                     </p>
                   </div>
                 </div>
+
+                {/* 个性化建议 */}
+                {insights?.suggestions?.length > 0 && (
+                  insights.suggestions.slice(0, 2).map((suggestion, index) => (
+                    <div key={index} className="flex items-start gap-3">
+                      <div className={`p-2 rounded-xl ${isLight ? 'bg-white' : 'bg-white/10'}`}>
+                        <Lightbulb size={16} className={isLight ? 'text-yellow-600' : 'text-yellow-400'} />
+                      </div>
+                      <div>
+                        <h4 className={`text-sm font-medium ${isLight ? 'text-gray-800' : 'text-white'}`}>
+                          {suggestion.title}
+                          {suggestion.priority === 'high' && (
+                            <span className="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">重要</span>
+                          )}
+                        </h4>
+                        <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
+                          {suggestion.description}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
