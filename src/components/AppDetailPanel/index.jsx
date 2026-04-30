@@ -720,8 +720,8 @@ const AppDetailPanel = () => {
                     </h4>
                     <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
                       {insights?.focusAnalysis ? (
-                        <>平均会话时长 <span className="font-semibold text-blue-500">{insights.focusAnalysis.averageFocusDurationMinutes}分钟</span>，
-                        专注度评分 <span className="font-semibold text-blue-500">{insights.focusAnalysis.focusScore}分</span>，
+                        <>平均会话时长 <span className="font-semibold text-blue-500">{insights.focusAnalysis.avgAllDuration || insights.focusAnalysis.averageFocusDurationMinutes || 0}分钟</span>，
+                        专注度评分 <span className="font-semibold text-blue-500">{insights.focusAnalysis.score || insights.focusAnalysis.focusScore || 0}分</span>，
                         {insights.focusAnalysis.focusLevel === 'high' ? '表明您在使用此应用时非常专注。' : 
                          insights.focusAnalysis.focusLevel === 'medium' ? '表明您在使用此应用时较为专注。' : 
                          '建议提升专注时长以提高效率。'}
