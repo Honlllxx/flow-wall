@@ -6,7 +6,7 @@ const path = require('path');
 const Store = require('electron-store');
 
 // ✅【新增】应用使用追踪器
-const { getAppUsageTracker } = require('./modules/appUsageTracker');
+const AppUsageTracker = require('./modules/appUsageTracker');
 
 const store = new Store();
 let wallpaperWin = null;
@@ -17,6 +17,7 @@ let appDetailWin = null; // 应用详情面板窗口
 let controlWinInitialX = null; // 存储controlWin的初始X坐标
 let windowHistory = []; // 窗口切换历史栈，记录用户操作路径
 let isDraggingWindow = false; // 标记窗口是否正在拖动
+let appTracker = null; // 应用使用追踪器实例（全局变量）
 // 移除重复请求检查标记
 // 移除重复请求检查标记
 
@@ -543,7 +544,7 @@ app.whenReady().then(() => {
   }
 
   // ✅【新增】初始化应用使用追踪器
-  const appTracker = getAppUsageTracker();
+  appTracker = new AppUsageTracker();
   appTracker.setupIPC();
   
   // 自动开始追踪（可选）
@@ -758,8 +759,9 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   
   // ✅【新增】停止应用使用追踪
-  const appTracker = getAppUsageTracker();
-  appTracker.stop();
+  if (appTracker) {
+    appTracker.stop();
+  }
 });
 
 // ==========================================
@@ -1011,8 +1013,8 @@ ipcMain.handle('get-app-detail-data', () => {
 // 应用列表选择应用后通知详情面板
 ipcMain.on('app-list-select', (event, appData) => {
   // 从应用使用追踪器中获取完整的应用数据
-  const appUsageTracker = getAppUsageTracker();
-  const todayStats = appUsageTracker.getTodayStatistics();
+  if (!appTracker) return;
+  const todayStats = appTracker.getTodayStatistics();
   const fullAppData = todayStats.find(app => app.appName === appData.appName);
   
   // 确保数据结构完整

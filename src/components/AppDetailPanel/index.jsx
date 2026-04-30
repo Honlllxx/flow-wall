@@ -121,6 +121,10 @@ const AppDetailPanel = () => {
   const [isEditingCategory, setIsEditingCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // 数据分析状态
+  const [peakAnalysis, setPeakAnalysis] = useState(null);
+  const [longestSession, setLongestSession] = useState(null);
+  const [historicalTrend, setHistoricalTrend] = useState(null);
 
   // 从主进程获取应用数据
   useEffect(() => {
@@ -193,6 +197,40 @@ const AppDetailPanel = () => {
         console.log('AppDetailPanel数据更新:', completeData);
       }
     });
+
+    // 加载数据分析数据
+    const loadAnalyticsData = async () => {
+      try {
+        if (window.api?.appUsage) {
+          // 获取峰值使用时段
+          const peakData = await window.api.appUsage.getPeakPeriod();
+          if (isMounted) {
+            setPeakAnalysis(peakData);
+            console.log('峰值使用时段分析:', peakData);
+          }
+          
+          // 获取最长会话
+          const sessionData = await window.api.appUsage.getLongestSession();
+          if (isMounted) {
+            setLongestSession(sessionData);
+            console.log('最长会话分析:', sessionData);
+          }
+          
+          // 获取历史趋势（最近7天）
+          const trendData = await window.api.appUsage.getHistoricalTrend(7);
+          if (isMounted) {
+            setHistoricalTrend(trendData);
+            console.log('历史趋势数据:', trendData);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load analytics data:', e);
+      }
+    };
+    
+    // 加载基础数据和分析数据
+    loadData();
+    loadAnalyticsData();
 
     // 清理函数
     return () => {
@@ -543,10 +581,10 @@ const AppDetailPanel = () => {
                   峰值使用时段
                 </h4>
                 <div className={`text-xl font-bold ${isLight ? 'text-gray-900' : 'text-white'}`}>
-                  {appData.peakHour ? `${appData.peakHour}:00 - ${appData.peakHour + 1}:00` : '14:00 - 16:00'}
+                  {peakAnalysis?.peakHourFormatted || '14:00 - 16:00'}
                 </div>
                 <p className={`text-xs mt-1 ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
-                  这段时间使用最为频繁
+                  占今日总使用的 {peakAnalysis?.peakPercentage || 25}%
                 </p>
               </div>
 
@@ -555,13 +593,49 @@ const AppDetailPanel = () => {
                   最长连续使用
                 </h4>
                 <div className={`text-xl font-bold ${isLight ? 'text-gray-900' : 'text-white'}`}>
-                  {appData.longestSession ? formatDuration(appData.longestSession) : '2小时15分'}
+                  {longestSession?.found ? longestSession.durationFormatted : '暂无数据'}
                 </div>
                 <p className={`text-xs mt-1 ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
-                  {appData.longestSessionStart ? `从 ${appData.longestSessionStart} 开始` : '上午10:00开始'}
+                  {longestSession?.found ? `${longestSession.appName} - ${longestSession.startTime}` : '-'}
                 </p>
               </div>
             </div>
+
+            {/* 历史趋势图表 */}
+            {historicalTrend && (
+              <div className={`rounded-2xl p-4 border ${isLight ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
+                <h3 className={`text-sm font-medium mb-4 ${isLight ? 'text-gray-800' : 'text-white'}`}>
+                  近7天使用趋势
+                </h3>
+                <div className="h-40">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={historicalTrend.trendData || []}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isLight ? '#e5e7eb' : 'rgba(255,255,255,0.1)'} />
+                      <XAxis 
+                        dataKey="date" 
+                        stroke={subTextColor} 
+                        tick={{ fontSize: 10 }}
+                        tickFormatter={(date) => {
+                          const d = new Date(date);
+                          return `${d.getMonth() + 1}/${d.getDate()}`;
+                        }}
+                      />
+                      <YAxis stroke={subTextColor} tick={{ fontSize: 10 }} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: isLight ? '#fff' : '#1F2937',
+                          border: 'none',
+                          borderRadius: '12px',
+                          boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
+                        }}
+                        formatter={(value) => [`${value} 分钟`, '使用时长']}
+                      />
+                      <Bar dataKey="totalDuration" fill="#60A5FA" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
