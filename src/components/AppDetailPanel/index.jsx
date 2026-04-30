@@ -181,25 +181,8 @@ const AppDetailPanel = () => {
       }
     };
     
-    loadData();
-
-    // 监听数据更新事件
-    const unsubscribe = window.api?.onAppDetailUpdated && window.api.onAppDetailUpdated((appData) => {
-      if (isMounted) {
-        // 确保数据结构完整并处理数据格式
-        const completeData = {
-          ...appData,
-          hourlyData: processHourlyData(appData?.hourlyData),
-          hourlySummary: processHourlySummary(appData?.hourlyData) // 使用每小时汇总数据
-        };
-        setAppData(completeData);
-        setNewCategory(appData?.category || '');
-        console.log('AppDetailPanel数据更新:', completeData);
-      }
-    });
-
     // 加载数据分析数据
-    const loadAnalyticsData = async () => {
+    const loadAnalyticsData = async (appName = null) => {
       try {
         if (window.api?.appUsage) {
           // 获取峰值使用时段
@@ -209,8 +192,8 @@ const AppDetailPanel = () => {
             console.log('峰值使用时段分析:', peakData);
           }
           
-          // 获取最长会话
-          const sessionData = await window.api.appUsage.getLongestSession();
+          // 获取最长会话（传入当前应用名称，只获取该应用的最长会话）
+          const sessionData = await window.api.appUsage.getLongestSession(appName);
           if (isMounted) {
             setLongestSession(sessionData);
             console.log('最长会话分析:', sessionData);
@@ -227,10 +210,53 @@ const AppDetailPanel = () => {
         console.error('Failed to load analytics data:', e);
       }
     };
-    
-    // 加载基础数据和分析数据
-    loadData();
-    loadAnalyticsData();
+
+    // 加载基础数据后再加载分析数据
+    const loadAllData = async () => {
+      try {
+        if (window.api?.getAppDetailData) {
+          const data = await window.api.getAppDetailData();
+          if (isMounted) {
+            // 确保数据结构完整并处理数据格式
+            const completeData = {
+              ...data,
+              hourlyData: processHourlyData(data?.hourlyData),
+              hourlySummary: processHourlySummary(data?.hourlyData) // 使用每小时汇总数据
+            };
+            setAppData(completeData);
+            setNewCategory(data?.category || '');
+            console.log('AppDetailPanel数据加载成功:', completeData);
+            
+            // 在基础数据加载完成后，再加载分析数据（传入应用名称）
+            await loadAnalyticsData(data?.appName);
+          }
+        } else {
+          console.warn('getAppDetailData API不可用');
+        }
+      } catch (e) {
+        console.error('Failed to load app data:', e);
+      }
+    };
+
+    loadAllData();
+
+    // 监听数据更新事件
+    const unsubscribe = window.api?.onAppDetailUpdated && window.api.onAppDetailUpdated((appData) => {
+      if (isMounted) {
+        // 确保数据结构完整并处理数据格式
+        const completeData = {
+          ...appData,
+          hourlyData: processHourlyData(appData?.hourlyData),
+          hourlySummary: processHourlySummary(appData?.hourlyData) // 使用每小时汇总数据
+        };
+        setAppData(completeData);
+        setNewCategory(appData?.category || '');
+        console.log('AppDetailPanel数据更新:', completeData);
+        
+        // 数据更新时重新加载分析数据
+        loadAnalyticsData(appData?.appName);
+      }
+    });
 
     // 清理函数
     return () => {

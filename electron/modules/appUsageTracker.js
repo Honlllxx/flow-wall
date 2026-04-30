@@ -322,10 +322,18 @@ class AppUsageTracker {
                             hourlyData = new Array(24).fill(0);
                         }
                         
-                        // 确保sessions是有效的数组
+                        // 确保sessions是有效的数组，并修复durationMs字段
                         let sessions = record.sessions;
                         if (!Array.isArray(sessions)) {
                             sessions = [];
+                        } else {
+                            // 确保每个会话都有durationMs字段
+                            sessions = sessions.map(session => {
+                                if (session && session.durationMs === undefined && session.duration) {
+                                    session.durationMs = this.parseDuration(session.duration);
+                                }
+                                return session;
+                            });
                         }
                         
                         this.usageData.set(record.appName, {
@@ -590,16 +598,27 @@ class AppUsageTracker {
     }
     
     // 分析方法：获取最长会话
-    getLongestSession() {
+    // appName: 可选参数，指定应用名称时只查找该应用的最长会话
+    getLongestSession(appName = null) {
         const todayData = this.getTodayStatistics();
         let longestSession = null;
         let maxDuration = 0;
         
-        todayData.forEach(app => {
+        // 如果指定了应用名称，只查找该应用的会话
+        const filteredApps = appName 
+            ? todayData.filter(app => app.appName === appName)
+            : todayData;
+        
+        filteredApps.forEach(app => {
             if (app.sessions && Array.isArray(app.sessions)) {
                 app.sessions.forEach(session => {
-                    const duration = session.durationMs || this.parseDuration(session.duration);
-                    if (duration > maxDuration) {
+                    // 使用更健壮的方式获取会话时长
+                    const duration = session.durationMs !== undefined 
+                        ? session.durationMs 
+                        : (session.duration ? this.parseDuration(session.duration) : 0);
+                    
+                    // 排除无效数据（时长必须大于0）
+                    if (duration > maxDuration && duration > 0) {
                         maxDuration = duration;
                         longestSession = {
                             appName: app.appName,
@@ -765,7 +784,7 @@ class AppUsageTracker {
         ipcMain.on('app-usage:stop', () => this.stop());
         // 数据分析API
         ipcMain.handle('app-usage:get-peak-period', () => this.getPeakUsagePeriod());
-        ipcMain.handle('app-usage:get-longest-session', () => this.getLongestSession());
+        ipcMain.handle('app-usage:get-longest-session', (event, appName = null) => this.getLongestSession(appName));
         ipcMain.handle('app-usage:get-historical-trend', (event, days) => this.getHistoricalTrend(days));
         ipcMain.handle('app-usage:is-running', () => this.isRunning);
         ipcMain.on('app-usage:set-config', (event, config) => {
