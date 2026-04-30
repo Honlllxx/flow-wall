@@ -83,6 +83,18 @@ contextBridge.exposeInMainWorld('api', {
     isRunning: () => ipcRenderer.invoke('app-usage:is-running'),
     // 设置配置
     setConfig: (config) => ipcRenderer.send('app-usage:set-config', config),
+    // 获取峰值使用时段
+    getPeakPeriod: () => ipcRenderer.invoke('app-usage:get-peak-period'),
+    // 获取最长会话
+    getLongestSession: () => ipcRenderer.invoke('app-usage:get-longest-session'),
+    // 获取历史趋势
+    getHistoricalTrend: (days) => ipcRenderer.invoke('app-usage:get-historical-trend', days),
+    // 获取数据验证
+    getValidation: () => ipcRenderer.invoke('app-usage:get-validation'),
+    // 获取峰值分析
+    analyzePeakPeriods: (days) => ipcRenderer.invoke('app-usage:analyze-peak-periods', days),
+    // 导出分析报告
+    exportReport: (days) => ipcRenderer.invoke('app-usage:export-report', days),
     // 监听实时更新
     onUpdate: (callback) => {
       const listener = (event, data) => callback(data);
