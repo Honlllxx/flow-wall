@@ -1,0 +1,10 @@
+{
+  "name": "com.flowwall.app",
+  "description": "FlowWall Native Messaging Host",
+  "path": "FlowWall.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://*",
+    "moz-extension://*"
+  ]
+}

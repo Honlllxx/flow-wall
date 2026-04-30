@@ -99,6 +99,10 @@ contextBridge.exposeInMainWorld('api', {
     analyzePeakPeriods: (days) => ipcRenderer.invoke('app-usage:analyze-peak-periods', days),
     // 导出分析报告
     exportReport: (days) => ipcRenderer.invoke('app-usage:export-report', days),
+    // 获取网站使用统计
+    getWebsites: () => ipcRenderer.invoke('app-usage:get-websites'),
+    // 获取网站详细信息
+    getWebsiteDetail: (domain) => ipcRenderer.invoke('app-usage:get-website-detail', domain),
     // 监听实时更新
     onUpdate: (callback) => {
       const listener = (event, data) => callback(data);
