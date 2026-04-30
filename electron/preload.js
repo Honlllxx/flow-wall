@@ -87,6 +87,10 @@ contextBridge.exposeInMainWorld('api', {
     getPeakPeriod: () => ipcRenderer.invoke('app-usage:get-peak-period'),
     // 获取最长会话（可选参数：appName，指定应用名称）
     getLongestSession: (appName) => ipcRenderer.invoke('app-usage:get-longest-session', appName),
+    // 获取综合性洞察报告（可选参数：appName，指定应用名称）
+    getInsights: (appName, days) => ipcRenderer.invoke('app-usage:get-insights', appName, days),
+    // 获取综合性洞察报告
+    getInsights: (days) => ipcRenderer.invoke('app-usage:get-insights', days),
     // 获取历史趋势
     getHistoricalTrend: (days) => ipcRenderer.invoke('app-usage:get-historical-trend', days),
     // 获取数据验证
