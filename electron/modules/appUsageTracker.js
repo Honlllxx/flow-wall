@@ -1452,13 +1452,21 @@ class AppUsageTracker {
         let breaks = 0;
         let periods = [];
         
+        // 统计所有会话
+        let totalAllDuration = 0;
+        let totalAllSessions = 0;
+        
         appData.forEach(app => {
             if (app.sessions && Array.isArray(app.sessions)) {
                 app.sessions.forEach(session => {
                     const duration = session.durationMs || this.parseDuration(session.duration);
                     
-                    // 专注会话定义：持续时间超过5分钟
-                    if (duration > 5 * 60 * 1000) {
+                    // 统计所有会话
+                    totalAllDuration += duration;
+                    totalAllSessions++;
+                    
+                    // 专注会话定义：持续时间超过2分钟（降低阈值）
+                    if (duration > 2 * 60 * 1000) {
                         totalFocusDuration += duration;
                         focusSessions++;
                         if (duration > longestFocusDuration) {
@@ -1479,16 +1487,25 @@ class AppUsageTracker {
             }
         });
         
+        // 所有会话的平均时长（用户期望看到的指标）
+        const avgAllDuration = totalAllSessions > 0 ? Math.round((totalAllDuration / totalAllSessions) / 60000) : 0;
         const avgFocusDuration = focusSessions > 0 ? Math.round((totalFocusDuration / focusSessions) / 60000) : 0;
         
         // 计算专注度分数（0-100）
-        // 基于：专注会话比例、平均专注时长、最长专注时长
+        // 改进算法：有会话就有基础分
         const totalSessions = appData.reduce((sum, app) => sum + (app.sessionCount || 0), 0);
         const focusRatio = totalSessions > 0 ? focusSessions / totalSessions : 0;
-        const avgDurationScore = Math.min(avgFocusDuration / 30, 1); // 30分钟为满分
-        const longestDurationScore = Math.min(longestFocusDuration / (60 * 60 * 1000), 1); // 1小时为满分
         
-        const score = Math.round((focusRatio * 0.4 + avgDurationScore * 0.3 + longestDurationScore * 0.3) * 100);
+        // 基础分数：有会话就有基础分（最多30分）
+        let baseScore = totalAllSessions > 0 ? Math.min(totalAllSessions * 5, 30) : 0;
+        
+        // 平均时长分数（基于所有会话的平均时长，最多40分）
+        const avgDurationScore = Math.min(avgAllDuration / 30, 1) * 40;
+        
+        // 最长专注时长分数（最多30分）
+        const longestDurationScore = Math.min(longestFocusDuration / (60 * 60 * 1000), 1) * 30;
+        
+        const score = Math.round(baseScore + avgDurationScore + longestDurationScore);
         
         let level = 'low';
         if (score >= 80) level = 'high';
@@ -1499,7 +1516,8 @@ class AppUsageTracker {
             level,
             totalFocusDuration,
             focusSessions,
-            avgFocusDuration,
+            avgFocusDuration,       // 专注会话平均时长
+            avgAllDuration,         // 所有会话平均时长（新增）
             longestFocusDuration,
             breaks,
             periods
