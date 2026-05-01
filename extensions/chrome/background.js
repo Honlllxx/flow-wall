@@ -197,18 +197,15 @@ class WebSocketClient {
   }
   
   setupSleepDetection() {
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
+    chrome.idle.onStateChanged.addListener((state) => {
+      if (state === 'idle' || state === 'locked') {
         this.onSleep();
-      } else {
+      } else if (state === 'active') {
         this.onWake();
       }
     });
     
-    if ('onfreeze' in document) {
-      document.addEventListener('freeze', () => this.onSleep());
-      document.addEventListener('resume', () => this.onWake());
-    }
+    chrome.idle.setDetectionInterval(60);
   }
   
   onSleep() {

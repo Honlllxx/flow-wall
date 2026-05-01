@@ -3,7 +3,7 @@
   "name": "FlowWall Web Tracker",
   "version": "1.0.0",
   "description": "追踪网站浏览时长，通过WebSocket同步到FlowWall",
-  "permissions": ["tabs", "storage", "activeTab"],
+  "permissions": ["tabs", "storage", "activeTab", "idle"],
   "host_permissions": ["<all_urls>", "ws://localhost:3000/*"],
   "background": {
     "service_worker": "background.js"
