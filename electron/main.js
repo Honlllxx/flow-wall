@@ -1,12 +1,71 @@
 const { app, BrowserWindow, screen, ipcMain, globalShortcut, Tray, Menu, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const WebSocket = require('ws');
 // ❌ 删除: const isDev = require('electron-is-dev'); 
 // 我们改用 app.isPackaged (Electron 自带功能，更稳定)
 const Store = require('electron-store');
 
 // ✅【新增】应用使用追踪器
 const AppUsageTracker = require('./modules/appUsageTracker');
+
+// WebSocket 服务器
+let wss = null;
+let wsServerPort = 3000;
+
+// 创建 WebSocket 服务器
+function createWebSocketServer() {
+  const server = http.createServer();
+  wss = new WebSocket.Server({ server });
+
+  wss.on('connection', (ws) => {
+    console.log('[WebSocket] Client connected');
+
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message);
+        console.log('[WebSocket] Received:', data.type);
+
+        // 处理浏览器扩展发送的数据
+        if (data.type === 'website_data') {
+          if (appTracker && data.payload) {
+            appTracker.handleWebsiteData(data.payload);
+          }
+        } else if (data.type === 'ping') {
+          ws.send(JSON.stringify({ type: 'pong' }));
+        } else if (data.type === 'sync_request') {
+          ws.send(JSON.stringify({ type: 'sync_response', payload: { status: 'connected' } }));
+        }
+      } catch (error) {
+        console.error('[WebSocket] Error parsing message:', error);
+      }
+    });
+
+    ws.on('close', () => {
+      console.log('[WebSocket] Client disconnected');
+    });
+
+    ws.on('error', (error) => {
+      console.error('[WebSocket] Client error:', error);
+    });
+
+    ws.send(JSON.stringify({ type: 'welcome', payload: { message: 'Connected to FlowWall' } }));
+  });
+
+  server.listen(wsServerPort, () => {
+    console.log(`[WebSocket] Server listening on port ${wsServerPort}`);
+  });
+
+  server.on('error', (error) => {
+    console.error('[WebSocket] Server error:', error);
+    if (error.code === 'EADDRINUSE') {
+      console.log(`[WebSocket] Port ${wsServerPort} is in use, trying ${wsServerPort + 1}`);
+      wsServerPort++;
+      createWebSocketServer();
+    }
+  });
+}
 
 const store = new Store();
 let wallpaperWin = null;
@@ -549,6 +608,9 @@ app.whenReady().then(() => {
   
   // 自动开始追踪（可选）
   appTracker.start();
+
+  // ✅【新增】启动 WebSocket 服务器
+  createWebSocketServer();
 
   createWallpaperWindow();
   createControlPanel();
