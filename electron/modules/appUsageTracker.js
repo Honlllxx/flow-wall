@@ -497,8 +497,10 @@ class AppUsageTracker {
                 lastUsed: stats.lastUsed,
                 hourlyData: stats.hourlyData || new Array(24).fill(0),
                 sessions: stats.sessions || [],
-                lastReportedDuration: stats.lastReportedDuration || 0,  // 保存上次报告的累计时长
-                lastReportedVisits: stats.lastReportedVisits || 0       // 保存上次报告的累计访问次数
+                lastReportedDuration: stats.lastReportedDuration || 0,      // 保存上次报告的累计时长
+                lastReportedVisits: stats.lastReportedVisits || 0,           // 保存上次报告的累计访问次数
+                lastReportedHourlyData: stats.lastReportedHourlyData || new Array(24).fill(0), // 保存上次报告的hourlyData
+                lastSessionId: stats.lastSessionId || null                   // 保存最后会话ID
             }))
         };
         
@@ -548,6 +550,12 @@ class AppUsageTracker {
                             });
                         }
                         
+                        // 处理 lastReportedHourlyData
+                        let lastReportedHourlyData = record.lastReportedHourlyData;
+                        if (!Array.isArray(lastReportedHourlyData) || lastReportedHourlyData.length !== 24) {
+                            lastReportedHourlyData = new Array(24).fill(0);
+                        }
+                        
                         this.usageData.set(record.appName, {
                             totalDuration: record.totalDuration || 0,
                             sessionCount: record.sessionCount || 0,
@@ -555,8 +563,10 @@ class AppUsageTracker {
                             lastUsed: record.lastUsed || this.formatTime(),
                             hourlyData,
                             sessions,
-                            lastReportedDuration: record.lastReportedDuration || 0,  // 加载上次报告的累计时长
-                            lastReportedVisits: record.lastReportedVisits || 0       // 加载上次报告的累计访问次数
+                            lastReportedDuration: record.lastReportedDuration || 0,      // 加载上次报告的累计时长
+                            lastReportedVisits: record.lastReportedVisits || 0,           // 加载上次报告的累计访问次数
+                            lastReportedHourlyData: lastReportedHourlyData,               // 加载上次报告的hourlyData
+                            lastSessionId: record.lastSessionId || null                   // 加载最后会话ID
                         });
                     });
                 }
@@ -1044,7 +1054,7 @@ class AppUsageTracker {
      * 处理单个域名数据
      */
     _handleSingleDomain(data, isInitial = false) {
-        const { domain, name, title, totalDuration, visitCount, lastVisit, hourlyData, sessions } = data;
+        const { domain, name, title, totalDuration, visitCount, lastVisit, hourlyData, sessions, reportTimestamp } = data;
         
         if (!domain) return;
         
@@ -1066,7 +1076,9 @@ class AppUsageTracker {
                     browser: null
                 },
                 lastReportedDuration: 0,  // 记录上次报告的累计时长，用于计算增量
-                lastReportedVisits: 0     // 记录上次报告的累计访问次数，用于计算增量
+                lastReportedVisits: 0,    // 记录上次报告的累计访问次数，用于计算增量
+                lastReportedHourlyData: new Array(24).fill(0), // 记录上次报告的hourlyData，用于增量计算
+                lastSessionId: null       // 记录最后处理的会话ID，避免重复
             });
         }
 
@@ -1079,13 +1091,21 @@ class AppUsageTracker {
             appData.sessionCount = visitCount || 0;
             appData.lastReportedDuration = totalDuration || 0;
             appData.lastReportedVisits = visitCount || 0;
-            // 初始化时直接设置 hourlyData 和 sessions，避免累加导致数据翻倍
+            
+            // 直接设置 hourlyData（不累加）
             if (hourlyData && Array.isArray(hourlyData)) {
-                appData.hourlyData = hourlyData.slice(0, 24).map((v, i) => v || 0);
+                appData.hourlyData = hourlyData.slice(0, 24).map(v => v || 0);
+                appData.lastReportedHourlyData = [...appData.hourlyData];
             }
+            
+            // 直接设置 sessions（不追加）
             if (sessions && Array.isArray(sessions)) {
                 appData.sessions = [...sessions];
+                if (sessions.length > 0 && sessions[sessions.length - 1].startTimeStamp) {
+                    appData.lastSessionId = sessions[sessions.length - 1].startTimeStamp;
+                }
             }
+            
             console.log(`[AppUsageTracker] Initializing website data for ${domain}: ${totalDuration}ms, ${visitCount} visits`);
         } else {
             // 增量模式：计算增量后累加
@@ -1099,27 +1119,40 @@ class AppUsageTracker {
             // 更新上次报告的值
             appData.lastReportedDuration = totalDuration || 0;
             appData.lastReportedVisits = visitCount || 0;
+            
+            // 增量更新 hourlyData（计算差值，避免重复累加）
+            if (hourlyData && Array.isArray(hourlyData)) {
+                hourlyData.forEach((value, index) => {
+                    if (index < 24) {
+                        const delta = Math.max(0, (value || 0) - appData.lastReportedHourlyData[index]);
+                        appData.hourlyData[index] += delta;
+                        appData.lastReportedHourlyData[index] = value || 0;
+                    }
+                });
+            }
+            
+            // 追加新的 sessions（去重）
+            if (sessions && Array.isArray(sessions)) {
+                const newSessions = sessions.filter(session => {
+                    return !appData.lastSessionId || 
+                           !session.startTimeStamp || 
+                           session.startTimeStamp > appData.lastSessionId;
+                });
+                appData.sessions.push(...newSessions);
+                
+                // 更新最后会话ID
+                if (newSessions.length > 0 && newSessions[newSessions.length - 1].startTimeStamp) {
+                    appData.lastSessionId = newSessions[newSessions.length - 1].startTimeStamp;
+                }
+                
+                // 限制会话记录数量
+                if (appData.sessions.length > 100) {
+                    appData.sessions = appData.sessions.slice(-100);
+                }
+            }
         }
         
         appData.lastUsed = lastVisit ? new Date(lastVisit).toLocaleTimeString() : this.formatTime();
-        
-        // 更新小时数据（如果提供）- 仅在非初始化模式下累加
-        if (!isInitial && hourlyData && Array.isArray(hourlyData)) {
-            hourlyData.forEach((value, index) => {
-                if (index < 24) {
-                    appData.hourlyData[index] += value || 0;
-                }
-            });
-        }
-        
-        // 添加会话记录（如果提供）- 仅在非初始化模式下追加
-        if (!isInitial && sessions && Array.isArray(sessions)) {
-            appData.sessions.push(...sessions);
-            // 限制会话记录数量
-            if (appData.sessions.length > 100) {
-                appData.sessions = appData.sessions.slice(-100);
-            }
-        }
         
         if (displayName && !appData.websiteInfo.displayName) {
             appData.websiteInfo.displayName = displayName;
