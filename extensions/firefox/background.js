@@ -80,9 +80,10 @@ class WebSocketClient {
         }
       };
       
-      this.socket.onerror = (error) => {
-        this.log('error', `WebSocket error: ${error.message}`);
-        this.onError(error);
+      this.socket.onerror = (event) => {
+        const errorMsg = event.type || 'WebSocket error';
+        this.log('error', `WebSocket error: ${errorMsg}`);
+        this.onError(event);
       };
       
     } catch (error) {
