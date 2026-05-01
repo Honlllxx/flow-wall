@@ -29,8 +29,8 @@ function createWebSocketServer() {
 
         // 处理浏览器扩展发送的数据
         if (data.type === 'website_data') {
-          if (appTracker && data.payload) {
-            appTracker.handleWebsiteData(data.payload);
+          if (appTracker && (data.data || data.payload)) {
+            appTracker.handleWebsiteData(data.data || data.payload);
           }
         } else if (data.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong' }));
