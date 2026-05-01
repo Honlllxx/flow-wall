@@ -24,7 +24,16 @@ function createWebSocketServer() {
 
     ws.on('message', (message) => {
       try {
-        const data = JSON.parse(message);
+        // 处理非 JSON 格式的消息（如心跳 ping）
+        const messageStr = message.toString();
+        
+        // 检查是否是纯文本 ping
+        if (messageStr === 'ping') {
+          ws.send('pong');
+          return;
+        }
+        
+        const data = JSON.parse(messageStr);
         console.log('[WebSocket] Received:', data.type);
 
         // 处理浏览器扩展发送的数据

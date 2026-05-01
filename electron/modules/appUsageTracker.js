@@ -497,6 +497,7 @@ class AppUsageTracker {
                 lastUsed: stats.lastUsed,
                 hourlyData: stats.hourlyData || new Array(24).fill(0),
                 sessions: stats.sessions || [],
+                websiteInfo: stats.websiteInfo || { domain: appName, displayName: appName, favicon: null, browser: null }, // 保存网站信息
                 lastReportedDuration: stats.lastReportedDuration || 0,      // 保存上次报告的累计时长
                 lastReportedVisits: stats.lastReportedVisits || 0,           // 保存上次报告的累计访问次数
                 lastReportedHourlyData: stats.lastReportedHourlyData || new Array(24).fill(0), // 保存上次报告的hourlyData
@@ -556,6 +557,14 @@ class AppUsageTracker {
                             lastReportedHourlyData = new Array(24).fill(0);
                         }
                         
+                        // 恢复 websiteInfo 字段
+                        const websiteInfo = record.websiteInfo || {
+                            domain: record.appName,
+                            displayName: record.appName,
+                            favicon: null,
+                            browser: null
+                        };
+                        
                         this.usageData.set(record.appName, {
                             totalDuration: record.totalDuration || 0,
                             sessionCount: record.sessionCount || 0,
@@ -563,6 +572,7 @@ class AppUsageTracker {
                             lastUsed: record.lastUsed || this.formatTime(),
                             hourlyData,
                             sessions,
+                            websiteInfo,
                             lastReportedDuration: record.lastReportedDuration || 0,      // 加载上次报告的累计时长
                             lastReportedVisits: record.lastReportedVisits || 0,           // 加载上次报告的累计访问次数
                             lastReportedHourlyData: lastReportedHourlyData,               // 加载上次报告的hourlyData
