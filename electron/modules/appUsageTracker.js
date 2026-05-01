@@ -827,7 +827,7 @@ class AppUsageTracker {
      * 处理单个域名数据
      */
     _handleSingleDomain(data) {
-        const { domain, name, title, totalDuration, visitCount, lastVisit } = data;
+        const { domain, name, title, totalDuration, visitCount, lastVisit, hourlyData, sessions } = data;
         
         if (!domain) return;
         
@@ -855,6 +855,24 @@ class AppUsageTracker {
         appData.totalDuration += totalDuration || 0;
         appData.sessionCount += visitCount || 1;
         appData.lastUsed = lastVisit ? new Date(lastVisit).toLocaleTimeString() : this.formatTime();
+        
+        // 更新小时数据（如果提供）
+        if (hourlyData && Array.isArray(hourlyData)) {
+            hourlyData.forEach((value, index) => {
+                if (index < 24) {
+                    appData.hourlyData[index] += value || 0;
+                }
+            });
+        }
+        
+        // 添加会话记录（如果提供）
+        if (sessions && Array.isArray(sessions)) {
+            appData.sessions.push(...sessions);
+            // 限制会话记录数量
+            if (appData.sessions.length > 100) {
+                appData.sessions = appData.sessions.slice(-100);
+            }
+        }
         
         if (displayName && !appData.websiteInfo.displayName) {
             appData.websiteInfo.displayName = displayName;
