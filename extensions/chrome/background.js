@@ -181,7 +181,7 @@ class WebSocketClient {
     this.heartbeatTimeoutTimer = setTimeout(() => {
       this.log('warning', 'Heartbeat timeout detected');
       if (this.socket) {
-        this.socket.close(1011, 'Heartbeat timeout');
+        this.socket.close(1000, 'Heartbeat timeout');
       }
     }, this.heartbeatTimeout);
   }
