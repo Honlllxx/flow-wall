@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "FlowWall Web Tracker",
   "version": "1.0.0",
-  "description": "追踪网站浏览时长，同步到 FlowWall",
+  "description": "追踪网站浏览时长，通过WebSocket同步到FlowWall",
   "permissions": ["tabs", "storage", "activeTab"],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": ["<all_urls>", "ws://localhost:3000/*"],
   "background": {
     "scripts": ["background.js"]
   },
@@ -17,6 +17,15 @@
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png"
+    }
+  },
+  "externally_connectable": {
+    "matches": ["*://*.localhost/*"]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "flowwall-webtracker@flowwall.app",
+      "strict_min_version": "109.0"
     }
   }
 }
