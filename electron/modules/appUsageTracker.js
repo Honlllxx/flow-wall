@@ -1079,6 +1079,13 @@ class AppUsageTracker {
             appData.sessionCount = visitCount || 0;
             appData.lastReportedDuration = totalDuration || 0;
             appData.lastReportedVisits = visitCount || 0;
+            // 初始化时直接设置 hourlyData 和 sessions，避免累加导致数据翻倍
+            if (hourlyData && Array.isArray(hourlyData)) {
+                appData.hourlyData = hourlyData.slice(0, 24).map((v, i) => v || 0);
+            }
+            if (sessions && Array.isArray(sessions)) {
+                appData.sessions = [...sessions];
+            }
             console.log(`[AppUsageTracker] Initializing website data for ${domain}: ${totalDuration}ms, ${visitCount} visits`);
         } else {
             // 增量模式：计算增量后累加
@@ -1096,8 +1103,8 @@ class AppUsageTracker {
         
         appData.lastUsed = lastVisit ? new Date(lastVisit).toLocaleTimeString() : this.formatTime();
         
-        // 更新小时数据（如果提供）
-        if (hourlyData && Array.isArray(hourlyData)) {
+        // 更新小时数据（如果提供）- 仅在非初始化模式下累加
+        if (!isInitial && hourlyData && Array.isArray(hourlyData)) {
             hourlyData.forEach((value, index) => {
                 if (index < 24) {
                     appData.hourlyData[index] += value || 0;
@@ -1105,8 +1112,8 @@ class AppUsageTracker {
             });
         }
         
-        // 添加会话记录（如果提供）
-        if (sessions && Array.isArray(sessions)) {
+        // 添加会话记录（如果提供）- 仅在非初始化模式下追加
+        if (!isInitial && sessions && Array.isArray(sessions)) {
             appData.sessions.push(...sessions);
             // 限制会话记录数量
             if (appData.sessions.length > 100) {
