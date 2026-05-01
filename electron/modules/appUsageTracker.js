@@ -6,10 +6,16 @@ const path = require('path');
 // 仅在 Windows 系统下工作
 const isWindows = os.platform() === 'win32';
 
+// 数据更新配置常量
+const UPDATE_INTERVAL = 500;      // 数据更新间隔（毫秒）
+const ACCURACY_THRESHOLD = 0.95;  // 数据准确率阈值（95%）
+const MAX_RETRY_ATTEMPTS = 3;     // 最大重试次数
+const ALERT_THRESHOLD = 5;        // 连续失败告警阈值
+
 class AppUsageTracker {
     constructor() {
         this.isRunning = false;
-        this.updateInterval = 500; // 500毫秒，提高精度
+        this.updateInterval = UPDATE_INTERVAL; // 500毫秒，提高精度
         this.saveInterval = 5000;  // 5秒
         this.trackSystemApps = false;
         this.updateCallbacks = new Set();
@@ -22,6 +28,7 @@ class AppUsageTracker {
         this.lastProcessId = 0;
         this.saveTimer = null;
         this.trackingTimer = null;
+        this.validationTimer = null;
         this.storagePath = path.join(os.homedir(), 'AppData', 'Local', 'FlowWall', 'app_usage');
         this.categories = this.getDefaultCategories();
         this.appToCategory = new Map();
@@ -30,6 +37,16 @@ class AppUsageTracker {
             'registry.exe', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe',
             'lsass.exe', 'svchost.exe', 'fontdrvhost.exe', 'dwm.exe', 'system'
         ];
+        
+        // 新增数据更新相关字段
+        this.updateLog = [];           // 更新日志
+        this.consecutiveFailures = 0;  // 连续失败次数
+        this.totalUpdates = 0;         // 总更新次数
+        this.successfulUpdates = 0;    // 成功更新次数
+        this.lastUpdateTime = null;    // 上次更新时间
+        this.updateLatencyHistory = []; // 更新延迟历史
+        this.alertCallback = null;     // 告警回调
+        
         this.initialize();
     }
 
@@ -70,13 +87,25 @@ class AppUsageTracker {
 
         this.isRunning = true;
         
-        // 启动追踪定时器
-        this.trackingTimer = setInterval(() => this.trackActiveWindow(), this.updateInterval);
+        // 启动追踪定时器（精确控制，带错误处理）
+        this.trackingTimer = setInterval(() => {
+            const startTime = Date.now();
+            try {
+                this.trackActiveWindow();
+                this.lastUpdateTime = Date.now();
+                this.recordUpdateLog('success', Date.now() - startTime);
+            } catch (error) {
+                this.handleUpdateError(error);
+            }
+        }, this.updateInterval);
         
         // 启动保存定时器
         this.saveTimer = setInterval(() => this.saveData(), this.saveInterval);
         
-        console.log('[AppUsageTracker] Started tracking');
+        // 启动数据验证定时器（每分钟验证一次）
+        this.validationTimer = setInterval(() => this.validateData(), 60000);
+        
+        console.log('[AppUsageTracker] Started tracking with enhanced update mechanism');
         return true;
     }
 
@@ -99,7 +128,188 @@ class AppUsageTracker {
         this.saveCurrentSession();
         this.saveData();
         
+        // 停止验证定时器
+        if (this.validationTimer) {
+            clearInterval(this.validationTimer);
+            this.validationTimer = null;
+        }
+        
+        // 记录停止日志
+        this.recordUpdateLog('stopped', 0);
         console.log('[AppUsageTracker] Stopped tracking');
+    }
+    
+    /**
+     * 数据验证流程
+     */
+    validateData() {
+        let validCount = 0;
+        let totalCount = 0;
+        
+        this.usageData.forEach((data, appName) => {
+            totalCount++;
+            
+            // 完整性校验
+            const hasRequiredFields = data.totalDuration !== undefined && 
+                                    data.sessionCount !== undefined &&
+                                    data.category !== undefined;
+            
+            // 准确性校验
+            const isValidDuration = typeof data.totalDuration === 'number' && data.totalDuration >= 0;
+            const isValidSessions = Array.isArray(data.sessions);
+            const isValidHourlyData = Array.isArray(data.hourlyData) && data.hourlyData.length === 24;
+            
+            if (hasRequiredFields && isValidDuration && isValidSessions && isValidHourlyData) {
+                validCount++;
+            } else {
+                console.warn(`[AppUsageTracker] Data validation failed for: ${appName}`);
+            }
+        });
+        
+        // 计算准确率
+        const accuracy = totalCount > 0 ? validCount / totalCount : 1;
+        
+        if (accuracy < ACCURACY_THRESHOLD) {
+            this.triggerAlert('data_accuracy', `数据准确率低于阈值: ${(accuracy * 100).toFixed(1)}%`);
+        }
+        
+        return accuracy;
+    }
+    
+    /**
+     * 处理更新错误
+     */
+    handleUpdateError(error) {
+        this.consecutiveFailures++;
+        this.recordUpdateLog('error', 0, error.message);
+        
+        console.error('[AppUsageTracker] Update error:', error.message);
+        
+        // 触发告警
+        if (this.consecutiveFailures >= ALERT_THRESHOLD) {
+            this.triggerAlert('consecutive_failures', `连续失败 ${this.consecutiveFailures} 次`);
+        }
+        
+        // 自动恢复机制
+        if (this.consecutiveFailures <= MAX_RETRY_ATTEMPTS) {
+            setTimeout(() => {
+                if (this.isRunning) {
+                    const startTime = Date.now();
+                    try {
+                        this.trackActiveWindow();
+                        this.lastUpdateTime = Date.now();
+                        this.consecutiveFailures = 0;
+                        this.recordUpdateLog('success', Date.now() - startTime);
+                    } catch (retryError) {
+                        this.handleUpdateError(retryError);
+                    }
+                }
+            }, this.updateInterval * this.consecutiveFailures);
+        }
+    }
+    
+    /**
+     * 触发告警
+     */
+    triggerAlert(type, message) {
+        const alert = {
+            type,
+            message,
+            timestamp: Date.now(),
+            severity: type === 'data_accuracy' ? 'warning' : 'error'
+        };
+        
+        console.error(`[AppUsageTracker ALERT] [${type}] ${message}`);
+        
+        // 通知主进程
+        if (typeof this.alertCallback === 'function') {
+            try {
+                this.alertCallback(alert);
+            } catch (error) {
+                console.error('[AppUsageTracker] Error calling alert callback:', error);
+            }
+        }
+    }
+    
+    /**
+     * 记录更新日志
+     */
+    recordUpdateLog(status, latency, errorMessage = null) {
+        const logEntry = {
+            timestamp: Date.now(),
+            status,
+            latency,
+            errorMessage,
+            totalUpdates: ++this.totalUpdates,
+            successfulUpdates: status === 'success' ? ++this.successfulUpdates : this.successfulUpdates,
+            accuracy: this.totalUpdates > 0 ? this.successfulUpdates / this.totalUpdates : 0
+        };
+        
+        this.updateLog.push(logEntry);
+        
+        // 保留最近1000条日志
+        if (this.updateLog.length > 1000) {
+            this.updateLog = this.updateLog.slice(-1000);
+        }
+        
+        // 更新延迟历史
+        if (status === 'success') {
+            this.updateLatencyHistory.push(latency);
+            if (this.updateLatencyHistory.length > 100) {
+                this.updateLatencyHistory = this.updateLatencyHistory.slice(-100);
+            }
+        }
+    }
+    
+    /**
+     * 获取更新统计信息
+     */
+    getUpdateStatistics() {
+        const avgLatency = this.updateLatencyHistory.length > 0
+            ? this.updateLatencyHistory.reduce((a, b) => a + b, 0) / this.updateLatencyHistory.length
+            : 0;
+        
+        const maxLatency = this.updateLatencyHistory.length > 0
+            ? Math.max(...this.updateLatencyHistory)
+            : 0;
+        
+        return {
+            totalUpdates: this.totalUpdates,
+            successfulUpdates: this.successfulUpdates,
+            accuracy: this.totalUpdates > 0 ? this.successfulUpdates / this.totalUpdates : 0,
+            avgLatency: avgLatency.toFixed(2),
+            maxLatency: maxLatency.toFixed(2),
+            consecutiveFailures: this.consecutiveFailures,
+            lastUpdateTime: this.lastUpdateTime,
+            isRunning: this.isRunning,
+            updateInterval: this.updateInterval
+        };
+    }
+    
+    /**
+     * 获取更新日志（最近N条）
+     */
+    getUpdateLog(count = 50) {
+        return this.updateLog.slice(-count);
+    }
+    
+    /**
+     * 重置统计数据
+     */
+    resetStatistics() {
+        this.updateLog = [];
+        this.consecutiveFailures = 0;
+        this.totalUpdates = 0;
+        this.successfulUpdates = 0;
+        this.updateLatencyHistory = [];
+        console.log('[AppUsageTracker] Statistics reset');
+    }
+    
+    /**
+     * 设置告警回调
+     */
+    setAlertCallback(callback) {
+        this.alertCallback = callback;
     }
 
     trackActiveWindow() {
