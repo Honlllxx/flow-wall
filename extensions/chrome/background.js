@@ -329,6 +329,11 @@ class TabTracker {
       }
     });
     
+    // 启动时立即发送初始化报告
+    setTimeout(() => {
+      this.generateReport(true);
+    }, 1000);
+    
     this.log('info', 'TabTracker started');
   }
   
@@ -449,13 +454,14 @@ class TabTracker {
     }
   }
   
-  generateReport() {
+  generateReport(isInitial = false) {
     const report = this.getReport();
     
     if (report.totalDuration > 0) {
+      report.isInitial = isInitial;  // 添加初始化标记
       this.onReport(report);
       this.saveToStorage();
-      this.log('info', `Generated report: ${report.totalDomains} domains`);
+      this.log('info', `Generated report: ${report.totalDomains} domains, initial: ${isInitial}`);
     }
   }
   
@@ -499,9 +505,11 @@ class TabTracker {
       totalDuration: sortedStats.reduce((sum, s) => sum + s.totalDuration, 0),
       domains: sortedStats.map(s => ({
         ...s,
-        totalDurationFormatted: this.formatDuration(s.totalDuration)
+        totalDurationFormatted: this.formatDuration(s.totalDuration),
+        reportTimestamp: now  // 添加时间戳用于去重
       })),
-      trackingStartTime: this.startTime
+      trackingStartTime: this.startTime,
+      reportTimestamp: now  // 报告级别时间戳
     };
   }
   

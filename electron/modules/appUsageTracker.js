@@ -496,7 +496,9 @@ class AppUsageTracker {
                 sessionCount: stats.sessionCount,
                 lastUsed: stats.lastUsed,
                 hourlyData: stats.hourlyData || new Array(24).fill(0),
-                sessions: stats.sessions || []
+                sessions: stats.sessions || [],
+                lastReportedDuration: stats.lastReportedDuration || 0,  // 保存上次报告的累计时长
+                lastReportedVisits: stats.lastReportedVisits || 0       // 保存上次报告的累计访问次数
             }))
         };
         
@@ -552,7 +554,9 @@ class AppUsageTracker {
                             category: record.category || '未分类',
                             lastUsed: record.lastUsed || this.formatTime(),
                             hourlyData,
-                            sessions
+                            sessions,
+                            lastReportedDuration: record.lastReportedDuration || 0,  // 加载上次报告的累计时长
+                            lastReportedVisits: record.lastReportedVisits || 0       // 加载上次报告的累计访问次数
                         });
                     });
                 }
@@ -1020,14 +1024,17 @@ class AppUsageTracker {
     handleWebsiteData(data) {
         if (!data) return;
 
+        // 检查是否为初始化报告
+        const isInitial = data.isInitial || false;
+        
         // 如果是报告格式（包含domains数组），遍历处理每个域名
         if (data.domains && Array.isArray(data.domains)) {
             data.domains.forEach(domainData => {
-                this._handleSingleDomain(domainData);
+                this._handleSingleDomain(domainData, isInitial);
             });
         } else if (data.domain) {
             // 单个域名对象格式
-            this._handleSingleDomain(data);
+            this._handleSingleDomain(data, isInitial);
         }
         
         this.saveData();
@@ -1036,7 +1043,7 @@ class AppUsageTracker {
     /**
      * 处理单个域名数据
      */
-    _handleSingleDomain(data) {
+    _handleSingleDomain(data, isInitial = false) {
         const { domain, name, title, totalDuration, visitCount, lastVisit, hourlyData, sessions } = data;
         
         if (!domain) return;
@@ -1057,13 +1064,36 @@ class AppUsageTracker {
                     displayName: displayName,
                     favicon: null,
                     browser: null
-                }
+                },
+                lastReportedDuration: 0,  // 记录上次报告的累计时长，用于计算增量
+                lastReportedVisits: 0     // 记录上次报告的累计访问次数，用于计算增量
             });
         }
 
         const appData = this.usageData.get(appName);
-        appData.totalDuration += totalDuration || 0;
-        appData.sessionCount += visitCount || 1;
+        
+        if (isInitial) {
+            // 初始化模式：直接设置值，不计算增量
+            // 用于插件启动时同步数据，确保数据一致
+            appData.totalDuration = totalDuration || 0;
+            appData.sessionCount = visitCount || 0;
+            appData.lastReportedDuration = totalDuration || 0;
+            appData.lastReportedVisits = visitCount || 0;
+            console.log(`[AppUsageTracker] Initializing website data for ${domain}: ${totalDuration}ms, ${visitCount} visits`);
+        } else {
+            // 增量模式：计算增量后累加
+            const durationDelta = Math.max(0, (totalDuration || 0) - appData.lastReportedDuration);
+            const visitDelta = Math.max(0, (visitCount || 0) - appData.lastReportedVisits);
+            
+            // 只累加增量部分
+            appData.totalDuration += durationDelta;
+            appData.sessionCount += visitDelta;
+            
+            // 更新上次报告的值
+            appData.lastReportedDuration = totalDuration || 0;
+            appData.lastReportedVisits = visitCount || 0;
+        }
+        
         appData.lastUsed = lastVisit ? new Date(lastVisit).toLocaleTimeString() : this.formatTime();
         
         // 更新小时数据（如果提供）
