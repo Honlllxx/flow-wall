@@ -632,6 +632,21 @@ class TabTracker {
   }
 }
 
+// 消息监听器（移到 initialize 外面，确保 service worker 重启后仍能响应）
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (!isInitialized) {
+    initialize();
+  }
+  
+  if (request.type === 'get_status') {
+    const response = {
+      connected: webSocketClient ? webSocketClient.connected : false,
+      summary: tabTracker ? tabTracker.getSummary() : null
+    };
+    sendResponse(response);
+  }
+});
+
 function initialize() {
   if (isInitialized) return;
   isInitialized = true;
@@ -690,15 +705,7 @@ function initialize() {
   console.log('[FlowWall] WebSocket client initialized');
 }
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === 'get_status') {
-    const response = {
-      connected: webSocketClient ? webSocketClient.connected : false,
-      summary: tabTracker ? tabTracker.getSummary() : null
-    };
-    sendResponse(response);
-  }
-});
+
 
 chrome.runtime.onStartup.addListener(() => {
   console.log('[FlowWall] Extension started on browser startup');
