@@ -1043,7 +1043,7 @@ class AppUsageTracker {
     /**
      * 处理单个域名数据
      */
-    _handleSingleDomain(data) {
+    _handleSingleDomain(data, isInitial = false) {
         const { domain, name, title, totalDuration, visitCount, lastVisit, hourlyData, sessions } = data;
         
         if (!domain) return;
@@ -1051,24 +1051,50 @@ class AppUsageTracker {
         const appName = domain;
         const displayName = name || title || domain;
         
-        // 直接用插件数据覆盖，保持与浏览器插件数据一致
-        // 插件返回的是完整的累计数据，直接使用即可
-        this.usageData.set(appName, {
-            totalDuration: totalDuration || 0,
-            sessionCount: visitCount || 0,
-            category: '网站',
-            lastUsed: lastVisit ? new Date(lastVisit).toLocaleTimeString() : this.formatTime(),
-            hourlyData: Array.isArray(hourlyData) && hourlyData.length === 24 ? hourlyData : new Array(24).fill(0),
-            sessions: Array.isArray(sessions) ? sessions.slice(-100) : [],
-            websiteInfo: {
-                domain: domain,
-                displayName: displayName,
-                favicon: null,
-                browser: null
-            }
-        });
+        if (!this.usageData.has(appName)) {
+            this.usageData.set(appName, {
+                totalDuration: 0,
+                sessionCount: 0,
+                category: '网站',
+                lastUsed: this.formatTime(),
+                hourlyData: new Array(24).fill(0),
+                sessions: [],
+                websiteInfo: {
+                    domain: domain,
+                    displayName: displayName,
+                    favicon: null,
+                    browser: null
+                },
+                lastReportedDuration: 0,  // 记录上次报告的累计时长，用于计算增量
+                lastReportedVisits: 0     // 记录上次报告的累计访问次数，用于计算增量
+            });
+        }
+
+        const appData = this.usageData.get(appName);
         
-        console.log(`[AppUsageTracker] Updated website data for ${domain}: ${totalDuration}ms, ${visitCount} visits`);
+        if (isInitial) {
+            // 初始化模式：直接设置值，不计算增量
+            // 用于插件启动时同步数据，确保数据一致
+            appData.totalDuration = totalDuration || 0;
+            appData.sessionCount = visitCount || 0;
+            appData.lastReportedDuration = totalDuration || 0;
+            appData.lastReportedVisits = visitCount || 0;
+            console.log(`[AppUsageTracker] Initializing website data for ${domain}: ${totalDuration}ms, ${visitCount} visits`);
+        } else {
+            // 增量模式：计算增量后累加
+            const durationDelta = Math.max(0, (totalDuration || 0) - appData.lastReportedDuration);
+            const visitDelta = Math.max(0, (visitCount || 0) - appData.lastReportedVisits);
+            
+            // 只累加增量部分
+            appData.totalDuration += durationDelta;
+            appData.sessionCount += visitDelta;
+            
+            // 更新上次报告的值
+            appData.lastReportedDuration = totalDuration || 0;
+            appData.lastReportedVisits = visitCount || 0;
+        }
+        
+        appData.lastUsed = lastVisit ? new Date(lastVisit).toLocaleTimeString() : this.formatTime();
         
         // 更新小时数据（如果提供）
         if (hourlyData && Array.isArray(hourlyData)) {
