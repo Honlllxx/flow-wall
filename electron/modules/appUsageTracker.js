@@ -803,13 +803,36 @@ class AppUsageTracker {
     
     /**
      * 处理浏览器扩展发送的网站数据
+     * 支持两种格式：
+     * 1. 单个域名对象: { domain, name, totalDuration, visitCount, lastVisit }
+     * 2. 报告格式: { domains: [{ domain, title, totalDuration, visitCount, lastVisit }] }
      */
     handleWebsiteData(data) {
-        if (!data || !data.domain) return;
+        if (!data) return;
 
-        const { domain, name, totalDuration, visitCount, lastVisit } = data;
+        // 如果是报告格式（包含domains数组），遍历处理每个域名
+        if (data.domains && Array.isArray(data.domains)) {
+            data.domains.forEach(domainData => {
+                this._handleSingleDomain(domainData);
+            });
+        } else if (data.domain) {
+            // 单个域名对象格式
+            this._handleSingleDomain(data);
+        }
+        
+        this.saveData();
+    }
+
+    /**
+     * 处理单个域名数据
+     */
+    _handleSingleDomain(data) {
+        const { domain, name, title, totalDuration, visitCount, lastVisit } = data;
+        
+        if (!domain) return;
         
         const appName = domain;
+        const displayName = name || title || domain;
         
         if (!this.usageData.has(appName)) {
             this.usageData.set(appName, {
@@ -821,7 +844,7 @@ class AppUsageTracker {
                 sessions: [],
                 websiteInfo: {
                     domain: domain,
-                    displayName: name || domain,
+                    displayName: displayName,
                     favicon: null,
                     browser: null
                 }
@@ -833,13 +856,11 @@ class AppUsageTracker {
         appData.sessionCount += visitCount || 1;
         appData.lastUsed = lastVisit ? new Date(lastVisit).toLocaleTimeString() : this.formatTime();
         
-        if (name && !appData.websiteInfo.displayName) {
-            appData.websiteInfo.displayName = name;
+        if (displayName && !appData.websiteInfo.displayName) {
+            appData.websiteInfo.displayName = displayName;
         }
 
         console.log(`[AppUsageTracker] 网站数据更新: ${domain}, 时长: ${totalDuration}`);
-        
-        this.saveData();
     }
     
     /**
