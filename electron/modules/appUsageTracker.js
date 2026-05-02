@@ -1168,7 +1168,7 @@ class AppUsageTracker {
             appData.websiteInfo.displayName = displayName;
         }
 
-        console.log(`[AppUsageTracker] 网站数据更新: ${domain}, 时长: ${appData.totalDuration}`);
+        console.log(`[AppUsageTracker] 网站数据更新: ${domain}, 时长: ${totalDuration}`);
     }
     
     /**
