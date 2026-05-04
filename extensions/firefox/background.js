@@ -294,21 +294,6 @@ class TabTracker {
     this.onReport = config.onReport || (() => {});
     this.onUpdate = config.onUpdate || (() => {});
     
-    // 分类系统（与主应用保持一致）
-    this.categories = {
-      '开发工具': ['github.com', 'gitlab.com', 'npmjs.com', 'codecov.io'],
-      '浏览器': [],
-      '通讯工具': ['web.wechat.com', 'mail.google.com', 'slack.com', 'discord.com'],
-      '娱乐': ['bilibili.com', 'youtube.com', 'music.163.com', 'spotify.com', 'steamcommunity.com'],
-      '办公': ['docs.google.com', 'office.com', 'notion.so', 'jira.com'],
-      '设计': ['figma.com', 'sketch.com', 'dribbble.com', 'behance.net'],
-      '系统工具': [],
-      '媒体播放': ['bilibili.com', 'youtube.com', 'youku.com', 'iqiyi.com']
-    };
-    
-    // 网站到分类的映射缓存
-    this.domainToCategory = new Map();
-    
     this.loadFromStorage();
   }
   
@@ -474,38 +459,6 @@ class TabTracker {
     }
   }
   
-  getCategory(domain) {
-    // 检查缓存
-    if (this.domainToCategory.has(domain)) {
-      return this.domainToCategory.get(domain);
-    }
-    
-    // 精确匹配
-    for (const [category, patterns] of Object.entries(this.categories)) {
-      if (patterns.includes(domain)) {
-        this.domainToCategory.set(domain, category);
-        return category;
-      }
-    }
-    
-    // 模糊匹配
-    for (const [category, patterns] of Object.entries(this.categories)) {
-      if (patterns.some(pattern => domain.includes(pattern) || pattern.includes(domain))) {
-        this.domainToCategory.set(domain, category);
-        return category;
-      }
-    }
-    
-    // 默认返回未分类
-    this.domainToCategory.set(domain, '未分类');
-    return '未分类';
-  }
-  
-  formatTime() {
-    const now = new Date();
-    return now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  }
-  
   getReport() {
     const now = Date.now();
     
@@ -525,40 +478,15 @@ class TabTracker {
           domain: tab.domain,
           title: tab.title,
           totalDuration: 0,
-          sessionCount: 0,
-          visits: 0,
-          lastVisit: null,
-          hourlyData: new Array(24).fill(0),
-          sessions: []
+          visitCount: 0,
+          lastVisit: null
         });
       }
       
       const stats = domainStats.get(tab.domain);
       stats.totalDuration += tab.duration;
-      stats.sessionCount += 1;
-      stats.visits += tab.visits;
+      stats.visitCount += tab.visits;
       stats.lastVisit = now;
-      
-      // 更新每小时数据
-      const hour = new Date(tab.startTime).getHours();
-      stats.hourlyData[hour] += tab.duration;
-      
-      // 添加会话记录
-      if (tab.duration > 0) {
-        const startDate = new Date(tab.startTime);
-        stats.sessions.push({
-          startTimeStamp: tab.startTime,
-          endTimeStamp: now,
-          startHour: hour,
-          endHour: hour,
-          startTime: startDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-          endTime: new Date(now).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-          duration: this.formatDuration(tab.duration),
-          durationMs: tab.duration,
-          percentage: Math.min(Math.round((tab.duration / 3600000) * 100), 100),
-          windowTitle: tab.title
-        });
-      }
     });
     
     const sortedStats = Array.from(domainStats.values())
@@ -570,25 +498,10 @@ class TabTracker {
       totalDomains: sortedStats.length,
       totalDuration: sortedStats.reduce((sum, s) => sum + s.totalDuration, 0),
       domains: sortedStats.map(s => ({
-        appName: s.domain,
-        category: this.getCategory(s.domain),
-        totalDuration: s.totalDuration,
-        sessionCount: s.sessionCount,
-        lastUsed: this.formatTime(),
-        hourlyData: s.hourlyData,
-        sessions: s.sessions.slice(-100),
-        source: 'browser_extension',
-        websiteInfo: {
-          domain: s.domain,
-          displayName: s.title || s.domain,
-          favicon: null,
-          browser: 'firefox'
-        },
-        reportTimestamp: now
+        ...s,
+        totalDurationFormatted: this.formatDuration(s.totalDuration)
       })),
-      trackingStartTime: this.startTime,
-      reportTimestamp: now,
-      source: 'browser_extension'
+      trackingStartTime: this.startTime
     };
   }
   
