@@ -1173,12 +1173,20 @@ class AppUsageTracker {
      * 处理单个域名数据
      */
     _handleSingleDomain(data, isInitial = false) {
-        const { domain, name, title, totalDuration, visitCount, lastVisit, hourlyData, sessions, reportTimestamp } = data;
+        // 支持新旧两种数据格式
+        const { 
+            domain, name, title, totalDuration, visitCount, lastVisit, hourlyData, sessions, 
+            reportTimestamp, appName: dataAppName, category: dataCategory, sessionCount,
+            websiteInfo, source 
+        } = data;
         
-        if (!domain) return;
+        // 优先使用appName，其次使用domain
+        const appName = dataAppName || domain;
         
-        const appName = domain;
-        const displayName = name || title || domain;
+        if (!appName) return;
+        
+        const displayName = name || title || websiteInfo?.displayName || appName;
+        const browser = websiteInfo?.browser || null;
         
         if (!this.usageData.has(appName)) {
             this.usageData.set(appName, {
@@ -1189,28 +1197,46 @@ class AppUsageTracker {
                 hourlyData: new Array(24).fill(0),
                 sessions: [],
                 websiteInfo: {
-                    domain: domain,
+                    domain: domain || appName,
                     displayName: displayName,
-                    favicon: null,
-                    browser: null
+                    favicon: websiteInfo?.favicon || null,
+                    browser: browser
                 },
                 lastReportedDuration: 0,  // 记录上次报告的累计时长，用于计算增量
                 lastReportedVisits: 0,    // 记录上次报告的累计访问次数，用于计算增量
                 lastReportedHourlyData: new Array(24).fill(0), // 记录上次报告的hourlyData，用于增量计算
                 lastSessionId: null,      // 记录最后处理的会话ID，避免重复
-                source: 'browser_extension'  // 数据来源标识
+                source: source || 'browser_extension'  // 数据来源标识
             });
         }
 
         const appData = this.usageData.get(appName);
         
+        // 更新分类（使用插件发送的分类，如果有的话）
+        if (dataCategory) {
+            appData.category = dataCategory;
+        }
+        
+        // 更新网站信息
+        if (websiteInfo) {
+            appData.websiteInfo = { ...appData.websiteInfo, ...websiteInfo };
+        }
+        
+        // 更新数据来源
+        if (source) {
+            appData.source = source;
+        }
+        
+        // 使用sessionCount或visitCount
+        const visits = sessionCount || visitCount;
+        
         if (isInitial) {
             // 初始化模式：直接设置值，不计算增量
             // 用于插件启动时同步数据，确保数据一致
             appData.totalDuration = totalDuration || 0;
-            appData.sessionCount = visitCount || 0;
+            appData.sessionCount = visits || 0;
             appData.lastReportedDuration = totalDuration || 0;
-            appData.lastReportedVisits = visitCount || 0;
+            appData.lastReportedVisits = visits || 0;
             
             // 直接设置 hourlyData（不累加）
             if (hourlyData && Array.isArray(hourlyData)) {
@@ -1226,11 +1252,11 @@ class AppUsageTracker {
                 }
             }
             
-            console.log(`[AppUsageTracker] Initializing website data for ${domain}: ${totalDuration}ms, ${visitCount} visits`);
+            console.log(`[AppUsageTracker] Initializing website data for ${appName}: ${totalDuration}ms, ${visits} visits`);
         } else {
             // 增量模式：计算增量后累加
             const durationDelta = Math.max(0, (totalDuration || 0) - appData.lastReportedDuration);
-            const visitDelta = Math.max(0, (visitCount || 0) - appData.lastReportedVisits);
+            const visitDelta = Math.max(0, (visits || 0) - appData.lastReportedVisits);
             
             // 只累加增量部分
             appData.totalDuration += durationDelta;
@@ -1238,7 +1264,7 @@ class AppUsageTracker {
             
             // 更新上次报告的值
             appData.lastReportedDuration = totalDuration || 0;
-            appData.lastReportedVisits = visitCount || 0;
+            appData.lastReportedVisits = visits || 0;
             
             // 增量更新 hourlyData（计算差值，避免重复累加）
             if (hourlyData && Array.isArray(hourlyData)) {
@@ -1288,7 +1314,8 @@ class AppUsageTracker {
         const websiteStats = [];
         
         for (const [appName, data] of this.usageData.entries()) {
-            if (data.category === '网站') {
+            // 同时支持旧的"网站"分类和新的browser_extension来源
+            if (data.category === '网站' || data.source === 'browser_extension') {
                 websiteStats.push({
                     appName: appName,
                     domain: data.websiteInfo?.domain || appName,
@@ -1297,7 +1324,11 @@ class AppUsageTracker {
                     totalDurationFormatted: this.formatDuration(data.totalDuration),
                     sessionCount: data.sessionCount,
                     lastUsed: data.lastUsed,
-                    category: data.category
+                    category: data.category,
+                    source: data.source,
+                    browser: data.websiteInfo?.browser,
+                    hourlyData: data.hourlyData,
+                    sessions: data.sessions
                 });
             }
         }
