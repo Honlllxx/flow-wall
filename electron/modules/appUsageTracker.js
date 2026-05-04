@@ -786,13 +786,16 @@ class AppUsageTracker {
                 // 确保时长不超过24小时
                 const validDuration = Math.min(todayDuration, maxDailyDuration);
                 
+                // 将 hourlyData 从毫秒转换为分钟，便于前端直接使用
+                const hourlyMinutes = hourlyData.map(val => Math.round((val || 0) / 60000));
+                
                 return {
                     appName,
                     category: data.category,
                     totalDuration: validDuration,
                     sessionCount: data.sessionCount,
                     lastUsed: data.lastUsed,
-                    hourlyData: hourlyData,
+                    hourlyData: hourlyMinutes, // 返回分钟数，前端可直接使用
                     sessions: data.sessions || [],
                     source: data.source || 'unknown'
                 };
