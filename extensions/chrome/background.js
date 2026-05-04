@@ -288,6 +288,18 @@ class TabTracker {
     this.timer = null;
     this.reportTimer = null;
     
+    // 新增：每小时数据（24小时数组）
+    this.hourlyData = new Array(24).fill(0);
+    // 新增：会话记录
+    this.sessions = [];
+    // 新增：上次报告的数据（用于增量计算）
+    this.lastReportedData = {
+      domains: new Map(),
+      hourlyData: new Array(24).fill(0),
+      totalDuration: 0,
+      visitCount: 0
+    };
+    
     this.onReport = config.onReport || (() => {});
     this.onUpdate = config.onUpdate || (() => {});
     
@@ -375,9 +387,15 @@ class TabTracker {
   }
   
   handleTabChange(tabId) {
+    // 记录上一个标签页的结束会话
     if (this.currentTabId && this.tabs.has(this.currentTabId)) {
       const prevTab = this.tabs.get(this.currentTabId);
       prevTab.active = false;
+      
+      // 记录会话
+      if (prevTab.startTime && prevTab.duration > 0) {
+        this.recordSession(prevTab);
+      }
     }
     
     chrome.tabs.get(tabId, (tab) => {
@@ -397,6 +415,28 @@ class TabTracker {
       
       this.log('info', `Switched to tab: ${tabData?.domain || 'unknown'}`);
     });
+  }
+  
+  recordSession(tab) {
+    if (!tab.domain || tab.duration < 1000) return; // 忽略小于1秒的会话
+    
+    const session = {
+      startTimeStamp: tab.startTime,
+      endTimeStamp: tab.startTime + tab.duration,
+      durationMs: tab.duration,
+      domain: tab.domain,
+      title: tab.title,
+      url: tab.url
+    };
+    
+    this.sessions.push(session);
+    
+    // 限制会话数量
+    if (this.sessions.length > 100) {
+      this.sessions = this.sessions.slice(-100);
+    }
+    
+    this.log('debug', `Recorded session: ${tab.domain}, ${this.formatDuration(tab.duration)}`);
   }
   
   updateTabInfo(tabId, tab) {
@@ -467,14 +507,27 @@ class TabTracker {
   
   getReport() {
     const now = Date.now();
+    const currentHour = new Date().getHours();
     
+    // 更新当前标签页的时长
     if (this.currentTabId) {
       const currentTab = this.tabs.get(this.currentTabId);
       if (currentTab && currentTab.active && currentTab.startTime) {
         currentTab.duration += now - currentTab.startTime;
         currentTab.startTime = now;
+        
+        // 更新当前小时的使用数据
+        this.hourlyData[currentHour] += currentTab.duration;
       }
     }
+    
+    // 累加所有标签页的时长到对应的小时
+    this.tabs.forEach((tab) => {
+      if (tab.duration > 0 && tab.startTime) {
+        const hour = new Date(tab.startTime).getHours();
+        this.hourlyData[hour] += tab.duration;
+      }
+    });
     
     const domainStats = new Map();
     
@@ -482,10 +535,13 @@ class TabTracker {
       if (!domainStats.has(tab.domain)) {
         domainStats.set(tab.domain, {
           domain: tab.domain,
+          name: tab.title,  // 新增：name字段
           title: tab.title,
           totalDuration: 0,
           visitCount: 0,
-          lastVisit: null
+          lastVisit: now,
+          hourlyData: new Array(24).fill(0),  // 新增：每个域名的hourlyData
+          sessions: []  // 新增：每个域名的会话
         });
       }
       
@@ -493,23 +549,70 @@ class TabTracker {
       stats.totalDuration += tab.duration;
       stats.visitCount += tab.visits;
       stats.lastVisit = now;
+      
+      // 分配时长到对应的小时
+      if (tab.startTime) {
+        const hour = new Date(tab.startTime).getHours();
+        stats.hourlyData[hour] += tab.duration;
+      }
+      
+      // 添加会话
+      if (tab.duration > 0 && tab.startTime) {
+        stats.sessions.push({
+          startTimeStamp: tab.startTime,
+          endTimeStamp: tab.startTime + tab.duration,
+          durationMs: tab.duration,
+          url: tab.url
+        });
+      }
     });
     
     const sortedStats = Array.from(domainStats.values())
       .sort((a, b) => b.totalDuration - a.totalDuration);
+    
+    // 计算增量数据（用于去重）
+    const incrementalDomains = sortedStats.map(s => {
+      const lastReported = this.lastReportedData.domains.get(s.domain) || { totalDuration: 0, visitCount: 0, hourlyData: new Array(24).fill(0) };
+      return {
+        ...s,
+        totalDuration: s.totalDuration,
+        visitCount: s.visitCount,
+        durationDelta: Math.max(0, s.totalDuration - lastReported.totalDuration),
+        visitDelta: Math.max(0, s.visitCount - lastReported.visitCount),
+        totalDurationFormatted: this.formatDuration(s.totalDuration),
+        reportTimestamp: now,
+        // 确保hourlyData是24小时数组
+        hourlyData: s.hourlyData.map((val, idx) => {
+          const delta = Math.max(0, (val || 0) - (lastReported.hourlyData[idx] || 0));
+          return delta;
+        })
+      };
+    });
+    
+    // 更新上次报告数据
+    sortedStats.forEach(s => {
+      this.lastReportedData.domains.set(s.domain, {
+        totalDuration: s.totalDuration,
+        visitCount: s.visitCount,
+        hourlyData: [...s.hourlyData]
+      });
+    });
+    this.lastReportedData.hourlyData = [...this.hourlyData];
+    this.lastReportedData.totalDuration = sortedStats.reduce((sum, s) => sum + s.totalDuration, 0);
+    this.lastReportedData.visitCount = sortedStats.reduce((sum, s) => sum + s.visitCount, 0);
     
     return {
       reportId: `report-${Date.now()}`,
       generatedAt: now,
       totalDomains: sortedStats.length,
       totalDuration: sortedStats.reduce((sum, s) => sum + s.totalDuration, 0),
-      domains: sortedStats.map(s => ({
-        ...s,
-        totalDurationFormatted: this.formatDuration(s.totalDuration),
-        reportTimestamp: now  // 添加时间戳用于去重
-      })),
+      domains: incrementalDomains,
       trackingStartTime: this.startTime,
-      reportTimestamp: now  // 报告级别时间戳
+      reportTimestamp: now,
+      // 新增：全局hourlyData
+      hourlyData: [...this.hourlyData],
+      // 新增：会话记录
+      sessions: [...this.sessions]
     };
   }
   
@@ -588,7 +691,18 @@ class TabTracker {
           ...tab
         })),
         currentTabId: this.currentTabId,
-        startTime: this.startTime
+        startTime: this.startTime,
+        hourlyData: [...this.hourlyData],
+        sessions: [...this.sessions],
+        lastReportedData: {
+          domains: Array.from(this.lastReportedData.domains.entries()).map(([domain, stats]) => ({
+            domain,
+            ...stats
+          })),
+          hourlyData: [...this.lastReportedData.hourlyData],
+          totalDuration: this.lastReportedData.totalDuration,
+          visitCount: this.lastReportedData.visitCount
+        }
       };
       
       chrome.storage.local.set({ tabTrackerData: data });
@@ -617,6 +731,35 @@ class TabTracker {
         
         this.currentTabId = data.currentTabId;
         this.startTime = data.startTime || Date.now();
+        
+        // 恢复hourlyData
+        if (data.hourlyData && Array.isArray(data.hourlyData)) {
+          this.hourlyData = data.hourlyData.slice(0, 24).map(v => v || 0);
+        }
+        
+        // 恢复sessions
+        if (data.sessions && Array.isArray(data.sessions)) {
+          this.sessions = [...data.sessions];
+        }
+        
+        // 恢复lastReportedData
+        if (data.lastReportedData) {
+          const reported = data.lastReportedData;
+          if (reported.domains && Array.isArray(reported.domains)) {
+            reported.domains.forEach(item => {
+              this.lastReportedData.domains.set(item.domain, {
+                totalDuration: item.totalDuration || 0,
+                visitCount: item.visitCount || 0,
+                hourlyData: item.hourlyData || new Array(24).fill(0)
+              });
+            });
+          }
+          if (reported.hourlyData && Array.isArray(reported.hourlyData)) {
+            this.lastReportedData.hourlyData = reported.hourlyData.slice(0, 24).map(v => v || 0);
+          }
+          this.lastReportedData.totalDuration = reported.totalDuration || 0;
+          this.lastReportedData.visitCount = reported.visitCount || 0;
+        }
         
         this.log('info', 'Loaded data from storage');
       }
