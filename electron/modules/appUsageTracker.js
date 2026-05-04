@@ -427,7 +427,8 @@ class AppUsageTracker {
                     category,
                     lastUsed: this.formatTime(),
                     hourlyData: new Array(24).fill(0), // 24小时使用数据
-                    sessions: [] // 会话记录
+                    sessions: [], // 会话记录
+                    source: 'desktop_app' // 数据来源标识
                 });
             }
             
@@ -545,7 +546,8 @@ class AppUsageTracker {
                 lastReportedDuration: stats.lastReportedDuration || 0,      // 保存上次报告的累计时长
                 lastReportedVisits: stats.lastReportedVisits || 0,           // 保存上次报告的累计访问次数
                 lastReportedHourlyData: stats.lastReportedHourlyData || new Array(24).fill(0), // 保存上次报告的hourlyData
-                lastSessionId: stats.lastSessionId || null                   // 保存最后会话ID
+                lastSessionId: stats.lastSessionId || null,                  // 保存最后会话ID
+                source: stats.source || 'unknown'                            // 保存数据来源标识
             }))
         };
         
@@ -620,7 +622,8 @@ class AppUsageTracker {
                             lastReportedDuration: record.lastReportedDuration || 0,      // 加载上次报告的累计时长
                             lastReportedVisits: record.lastReportedVisits || 0,           // 加载上次报告的累计访问次数
                             lastReportedHourlyData: lastReportedHourlyData,               // 加载上次报告的hourlyData
-                            lastSessionId: record.lastSessionId || null                   // 加载最后会话ID
+                            lastSessionId: record.lastSessionId || null,                  // 加载最后会话ID
+                            source: record.source || 'unknown'                            // 加载数据来源标识
                         });
                     });
                 }
@@ -740,14 +743,45 @@ class AppUsageTracker {
         }
     }
 
+    /**
+     * 判断是否为浏览器应用
+     */
+    _isBrowserApp(appName) {
+        const browserNames = ['msedge', 'chrome', 'firefox', 'brave', 'opera', 'vivaldi'];
+        return browserNames.some(name => appName.toLowerCase().includes(name));
+    }
+    
+    /**
+     * 计算网站数据总时长（用于去重）
+     */
+    _calculateWebsiteTotalDuration() {
+        let total = 0;
+        for (const [appName, data] of this.usageData.entries()) {
+            if (data.source === 'browser_extension') {
+                const hourlyData = data.hourlyData || new Array(24).fill(0);
+                total += hourlyData.reduce((sum, val) => sum + (val || 0), 0);
+            }
+        }
+        return total;
+    }
+    
     getTodayStatistics() {
         const maxDailyDuration = 24 * 60 * 60 * 1000; // 24小时（毫秒）
+        
+        // 计算网站数据总时长（用于浏览器应用去重）
+        const websiteTotalDuration = this._calculateWebsiteTotalDuration();
         
         return Array.from(this.usageData.entries())
             .map(([appName, data]) => {
                 // 使用 hourlyData 计算今日时长（每小时数据的总和）
                 const hourlyData = data.hourlyData || new Array(24).fill(0);
-                const todayDuration = hourlyData.reduce((sum, val) => sum + (val || 0), 0);
+                let todayDuration = hourlyData.reduce((sum, val) => sum + (val || 0), 0);
+                
+                // 跨平台去重：如果是浏览器应用且数据来自桌面应用，减去网站数据时长
+                // 避免浏览器应用使用时长与网站使用时长重复统计
+                if (this._isBrowserApp(appName) && data.source === 'desktop_app') {
+                    todayDuration = Math.max(0, todayDuration - websiteTotalDuration);
+                }
                 
                 // 确保时长不超过24小时
                 const validDuration = Math.min(todayDuration, maxDailyDuration);
@@ -759,7 +793,8 @@ class AppUsageTracker {
                     sessionCount: data.sessionCount,
                     lastUsed: data.lastUsed,
                     hourlyData: hourlyData,
-                    sessions: data.sessions || []
+                    sessions: data.sessions || [],
+                    source: data.source || 'unknown'
                 };
             })
             .sort((a, b) => b.totalDuration - a.totalDuration);
@@ -769,6 +804,9 @@ class AppUsageTracker {
         const summary = {};
         const maxDailyDuration = 24 * 60 * 60 * 1000; // 24小时（毫秒）
         
+        // 计算网站数据总时长（用于浏览器应用去重）
+        const websiteTotalDuration = this._calculateWebsiteTotalDuration();
+        
         for (const [appName, data] of this.usageData.entries()) {
             const category = data.category;
             if (!summary[category]) {
@@ -777,7 +815,13 @@ class AppUsageTracker {
             
             // 使用 hourlyData 计算今日时长
             const hourlyData = data.hourlyData || new Array(24).fill(0);
-            const todayDuration = hourlyData.reduce((sum, val) => sum + (val || 0), 0);
+            let todayDuration = hourlyData.reduce((sum, val) => sum + (val || 0), 0);
+            
+            // 跨平台去重：如果是浏览器应用且数据来自桌面应用，减去网站数据时长
+            if (this._isBrowserApp(appName) && data.source === 'desktop_app') {
+                todayDuration = Math.max(0, todayDuration - websiteTotalDuration);
+            }
+            
             const validDuration = Math.min(todayDuration, maxDailyDuration);
             
             summary[category] += validDuration;
@@ -1150,7 +1194,8 @@ class AppUsageTracker {
                 lastReportedDuration: 0,  // 记录上次报告的累计时长，用于计算增量
                 lastReportedVisits: 0,    // 记录上次报告的累计访问次数，用于计算增量
                 lastReportedHourlyData: new Array(24).fill(0), // 记录上次报告的hourlyData，用于增量计算
-                lastSessionId: null       // 记录最后处理的会话ID，避免重复
+                lastSessionId: null,      // 记录最后处理的会话ID，避免重复
+                source: 'browser_extension'  // 数据来源标识
             });
         }
 
