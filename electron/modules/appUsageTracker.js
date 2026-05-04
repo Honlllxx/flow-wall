@@ -697,28 +697,46 @@ class AppUsageTracker {
     }
 
     getTodayStatistics() {
+        const maxDailyDuration = 24 * 60 * 60 * 1000; // 24小时（毫秒）
+        
         return Array.from(this.usageData.entries())
-            .map(([appName, data]) => ({
-                appName,
-                category: data.category,
-                totalDuration: data.totalDuration,
-                sessionCount: data.sessionCount,
-                lastUsed: data.lastUsed,
-                hourlyData: data.hourlyData || new Array(24).fill(0),
-                sessions: data.sessions || []
-            }))
+            .map(([appName, data]) => {
+                // 使用 hourlyData 计算今日时长（每小时数据的总和）
+                const hourlyData = data.hourlyData || new Array(24).fill(0);
+                const todayDuration = hourlyData.reduce((sum, val) => sum + (val || 0), 0);
+                
+                // 确保时长不超过24小时
+                const validDuration = Math.min(todayDuration, maxDailyDuration);
+                
+                return {
+                    appName,
+                    category: data.category,
+                    totalDuration: validDuration,
+                    sessionCount: data.sessionCount,
+                    lastUsed: data.lastUsed,
+                    hourlyData: hourlyData,
+                    sessions: data.sessions || []
+                };
+            })
             .sort((a, b) => b.totalDuration - a.totalDuration);
     }
 
     getCategorySummary() {
         const summary = {};
+        const maxDailyDuration = 24 * 60 * 60 * 1000; // 24小时（毫秒）
         
         for (const [appName, data] of this.usageData.entries()) {
             const category = data.category;
             if (!summary[category]) {
                 summary[category] = 0;
             }
-            summary[category] += data.totalDuration;
+            
+            // 使用 hourlyData 计算今日时长
+            const hourlyData = data.hourlyData || new Array(24).fill(0);
+            const todayDuration = hourlyData.reduce((sum, val) => sum + (val || 0), 0);
+            const validDuration = Math.min(todayDuration, maxDailyDuration);
+            
+            summary[category] += validDuration;
         }
         
         return summary;
