@@ -140,6 +140,50 @@ class AppUsageTracker {
     }
     
     /**
+     * 暂停追踪（睡眠模式）
+     */
+    pauseTracking() {
+        if (!this.isRunning) return;
+        
+        // 保存当前会话
+        this.saveCurrentSession();
+        
+        // 停止追踪定时器（保留保存定时器和验证定时器）
+        if (this.trackingTimer) {
+            clearInterval(this.trackingTimer);
+            this.trackingTimer = null;
+        }
+        
+        // 保存数据
+        this.saveData();
+        
+        console.log('[AppUsageTracker] Tracking paused (sleep mode)');
+    }
+    
+    /**
+     * 恢复追踪（唤醒模式）
+     */
+    resumeTracking() {
+        if (!this.isRunning) return;
+        
+        // 重新启动追踪定时器
+        if (!this.trackingTimer) {
+            this.trackingTimer = setInterval(() => {
+                const startTime = Date.now();
+                try {
+                    this.trackActiveWindow();
+                    this.lastUpdateTime = Date.now();
+                    this.recordUpdateLog('success', Date.now() - startTime);
+                } catch (error) {
+                    this.handleUpdateError(error);
+                }
+            }, this.updateInterval);
+        }
+        
+        console.log('[AppUsageTracker] Tracking resumed (wake up)');
+    }
+    
+    /**
      * 数据验证流程
      */
     validateData() {

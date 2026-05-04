@@ -677,6 +677,22 @@ function initialize() {
     
     onMessage: (event) => {
       console.log('[FlowWall] Received message:', event.data);
+      
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'sleep') {
+          console.log('[FlowWall] Received sleep command - pausing tracking');
+          tabTracker.pauseTracking();
+          webSocketClient.isSleeping = true;
+        } else if (data.type === 'wake') {
+          console.log('[FlowWall] Received wake command - resuming tracking');
+          webSocketClient.isSleeping = false;
+          tabTracker.resumeTracking();
+        }
+      } catch (error) {
+        console.error('[FlowWall] Error parsing message:', error);
+      }
     },
     
     onError: (error) => {

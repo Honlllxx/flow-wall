@@ -76,6 +76,52 @@ function createWebSocketServer() {
   });
 }
 
+// 睡眠状态处理
+let isSleeping = false;
+
+// 发送消息给所有 WebSocket 客户端
+function sendToAllClients(message) {
+  if (wss) {
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+  }
+}
+
+// 处理睡眠状态
+function handleSleep() {
+  if (isSleeping) return;
+  isSleeping = true;
+  
+  console.log('[System] Entering sleep mode');
+  
+  // 1. 通知浏览器插件暂停
+  sendToAllClients(JSON.stringify({ type: 'sleep' }));
+  
+  // 2. 停止应用追踪
+  if (appTracker) {
+    appTracker.pauseTracking();
+  }
+}
+
+// 处理唤醒状态
+function handleWake() {
+  if (!isSleeping) return;
+  isSleeping = false;
+  
+  console.log('[System] Waking up from sleep');
+  
+  // 1. 通知浏览器插件恢复
+  sendToAllClients(JSON.stringify({ type: 'wake' }));
+  
+  // 2. 恢复应用追踪
+  if (appTracker) {
+    appTracker.resumeTracking();
+  }
+}
+
 const store = new Store();
 let wallpaperWin = null;
 let controlWin = null;
