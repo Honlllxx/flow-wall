@@ -39,3 +39,4 @@ registry
 
 # Trae AI 配置目录
 .trae/
+extensions/firefox/*
