@@ -15,6 +15,7 @@
     "install:native": "cd native/app-tracker && npm install"
   },
   "dependencies": {
+    "better-sqlite3": "^12.9.0",
     "classnames": "^2.5.1",
     "electron-is-dev": "^3.0.1",
     "electron-store": "^6.0.1",

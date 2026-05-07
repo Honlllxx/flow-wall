@@ -3,9 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const WebSocket = require('ws');
-// ❌ 删除: const isDev = require('electron-is-dev'); 
-// 我们改用 app.isPackaged (Electron 自带功能，更稳定)
 const Store = require('electron-store');
+
+// ✅【新增】SQLite 数据库模块
+const { getDatabase, closeDatabase } = require('../database/index');
+const { runMigrations } = require('../database/migration');
+const { applications, websites, appSessions, websiteSessions, dailyStats, userConfig, backup, formatDate } = require('../database/utils');
 
 // ✅【新增】应用使用追踪器
 const AppUsageTracker = require('./modules/appUsageTracker');
@@ -647,7 +650,7 @@ function restorePanelPositions() {
   hasPerformedSwapAnimation = false;
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // 生产环境下注册开机自启
   if (app.isPackaged) {
     app.setLoginItemSettings({
@@ -655,6 +658,14 @@ app.whenReady().then(() => {
       path: app.getPath('exe'),
       args: ['--process-start-args', `"--hidden"`]
     });
+  }
+
+  // ✅【新增】初始化 SQLite 数据库
+  try {
+    await runMigrations();
+    console.log('[Database] SQLite database initialized successfully');
+  } catch (error) {
+    console.error('[Database] Failed to initialize database:', error);
   }
 
   // ✅【新增】初始化应用使用追踪器
@@ -879,6 +890,18 @@ app.on('will-quit', () => {
   if (appTracker) {
     appTracker.stop();
   }
+  
+  // ✅【新增】创建数据库备份
+  try {
+    const backupPath = backup.create();
+    console.log(`[Database] Backup created: ${backupPath}`);
+  } catch (error) {
+    console.error('[Database] Failed to create backup:', error);
+  }
+  
+  // ✅【新增】关闭数据库连接
+  closeDatabase();
+  console.log('[Database] Connection closed');
 });
 
 // ==========================================
